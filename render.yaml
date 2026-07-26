@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: helix-jac
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: HELIX_PUBLIC_ORIGIN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: HELIX_CAD_WORKER_URL
+        sync: false
+      - key: HELIX_PCB_WORKER_URL
+        sync: false
+      - key: HELIX_FIRMWARE_WORKER_URL
+        sync: false
+      - key: HELIX_STRIPE_CHECKOUT_URL
+        sync: false

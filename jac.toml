@@ -3,9 +3,8 @@ name = "helix"
 version = "1.0.0"
 description = "Helix native Jac hardware engineering workspace"
 entry-point = "main.jac"
-
-[dependencies]
-byllm = ">=0.1.0"
+kind = "web-app"
+jac-version = "==0.34.7"
 
 [dependencies.npm]
 react = "^18.2.0"

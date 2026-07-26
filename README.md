@@ -15,7 +15,7 @@ The application is intentionally not a Next.js backend. `jac start` serves both 
 ## Local Development
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash -s -- --version 0.34.7
 export PATH="$HOME/.local/bin:$PATH"
 jac install
 jac start --dev
@@ -41,6 +41,8 @@ docker run -p 8000:8000 --env-file .env helix-jac
 ```
 
 If a static marketing shell is deployed to Vercel later, it should call this Jac service over HTTPS. The Jac backend should not be replaced by `next build`.
+
+The project has no `package.json` on purpose. A host that tries to run `npm install`, `next build`, or a Vercel Next.js build is using stale deployment settings and is not deploying Helix.
 
 ## AR Notes
 
