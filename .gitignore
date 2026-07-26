@@ -1,93 +1,57 @@
-# Python / Jac artifacts
-*.log
-*.pyc
-__pycache__
-venv
-.jac/
-*.jir
-*.jbc
-_precompiled/
-_dist/
-_planning/
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# Distribution / packaging
-.Python
-play/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-.venv/
+# dependencies
+/node_modules
+/.venv-pcbflow
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
 
-# Others #
-.coverage
-.session
-*.session.db
-*.session.*.json
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
 .DS_Store
-.vscode
-build
-*Zone.Identifier
-codegen_output*
-.pytest_cache/
+*.pem
 
-*.rdb
-node_modules
-out.dot
-out.txt
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm-cache/
 
-# Mypy files #
-.mypy_cache*
+# env files (can opt-in for committing if needed)
+.env*
+!.env.example
+mcp.env
+mcp-minimal.env
 
-# Jaclang session files
-*.session
-demo/
+# Cursor (local)
+.cursor/
 
-# session files
-*.bak
-*.dat
-*.dir
-.env
+# vercel
+.vercel
 
-# Zig build artifacts. jac/.gitignore covers the in-tree binary build under jac/,
-# but `jac run` invoking the native backend emits a .zig-cache/ at the *repo
-# root* (its cwd) too -- and a release `git add -A` (release.yml) will
-# otherwise sweep in the >100 MB outputs and get rejected by GitHub's file-size
-# limit. These patterns are path-anchored to any depth, so they catch both.
-.zig-cache/
-zig-out/
+# typescript
+*.tsbuildinfo
+next-env.d.ts
 
-# Agent / IDE working notes (not repo artifacts)
-AGENTS.md
-PLAN.md
-IMPLEMENTATION.md
-RUNTIME_SPLIT_PROGRESS.md
-
-# Claude Code local instructions
-CLAUDE.local.md
-.claude/
-
-jactastic/**
-.mcp.json
-.gstack/
-
-# Docs "Build Anything" track pages live under docs/docs/build/ -- the bare
-# `build` rule above would otherwise ignore them. Keep this content tracked.
-!docs/docs/build/
-!docs/docs/build/**
-
-# Zig 0.16 project-local package cache (fetched, hash-pinned deps)
-zig-pkg/
+# Circuitron / local codegen runs (keep repo clone small)
+circuitron-*/
+circuitron_output/
+**/lib_pickle_dir/
+*.pkl
+debug_response.json
+final_test.json
