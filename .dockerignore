@@ -1,39 +1,69 @@
-# Dependencies & build output (rebuilt in image)
-node_modules
-.next
-out
+# .dockerignore for the jaseci repo root. Keeps the docker build context
+# bounded - without this, `.git` (~860MB) + caches push past 2GB and the
+# build times out before any layer runs.
 
-# Local Python (image creates its own .venv-pcbflow)
-.venv-pcbflow
-**/__pycache__
-*.pyc
-
-# Git & IDE
+# Git + CI + editor + OS metadata
 .git
 .gitignore
-.cursor
-*.md
-!README.md
+.gitattributes
+.github
+.vscode
+.idea
+.DS_Store
+*.swp
+*.swo
+*~
 
-# Secrets & local env (set on Render dashboard)
+# Python build / cache artifacts
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.egg-info
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.coverage
+**/htmlcov
+**/.tox
+**/.venv
+**/venv
+
+# Python build outputs - anchored so `**/dist` doesn't drop `.jac/client/dist`.
+/dist
+/build
+jac/dist
+jac/build
+jac-scale/dist
+jac-scale/build
+*.tar.gz
+*.whl
+
+# Zig launcher build caches. The prebuilt binary at jac/zig-out/bin/jac IS
+# needed in the context (the microservice image copies it), but the launcher's
+# intermediate cache and the fetched python-build-standalone tree are heavy
+# build-only artifacts that must not bloat the context.
+jac/.zig-cache
+jac/.pbs-build
+
+# Jac runtime artifacts. Specific subdirs - blanket `**/.jac` would
+# silently drop the FE bundle at `.jac/client/dist`.
+**/.jac/cache
+**/.jac/data
+**/.jac/logs
+**/.jac/run
+**/.jac/__pycache__
+
+# Frontend
+**/node_modules
+**/.vite
+**/.next
+**/.turbo
+
+# Working docs / secrets / test artifacts
+.local-docs
 .env
 .env.*
-!.env.example
-
-# Large / irrelevant for production image
-circuitron-*
-circuitron_output
-**/lib_pickle_dir
-*.pkl
-debug_response.json
-final_test.json
-terminals
-coverage
-
-# Test & scratch scripts at repo root (optional shrink)
-test_*.py
-test_*.js
-test_*.sh
-debug_*.js
-quick_test.py
-simple_led_test.*
+.envrc
+*.local
+**/test-results
+**/playwright-report
