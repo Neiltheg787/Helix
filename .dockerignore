@@ -1,7 +1,9 @@
 .git
 .jac
 dist
+dist-ui
 node_modules
+tsconfig.tsbuildinfo
 .env
 .env.*
 *.log

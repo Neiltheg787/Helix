@@ -2,17 +2,18 @@
 
 ## Supported Topology
 
-Helix runs as a native Jac service.
+Helix runs as a native Jac API service plus a static React UI.
 
-1. Build and run the Jac container on a container platform such as Render, Fly.io, Railway, ECS, or Kubernetes.
-2. Terminate HTTPS at the platform or reverse proxy.
-3. Configure any optional worker URLs through environment variables.
-4. If Vercel is used, deploy only an optional static frontend shell and point it at the Jac API. Do not use `next build` as the Helix production build.
+1. Build and run the Jac backend on a container platform such as Render, Fly.io, Railway, ECS, or Kubernetes.
+2. Build the React UI with `npm run build`.
+3. Deploy `dist-ui/` to a static host and set `VITE_HELIX_API_URL` to the public JaC backend URL.
+4. Terminate HTTPS at the platform or reverse proxy.
+5. Configure optional worker URLs through environment variables.
 
-The repository root intentionally does not contain `package.json`, `next.config.*`, `src/`, `app/`, or `pages/`. Production is not a Node/Next build. The supported production entrypoint is:
+The repository root intentionally contains `package.json` only for the Vite UI. It does not contain `next.config.*`, `src/`, `app/`, or `pages/`, and production is not a Node/Next build. The supported backend entrypoint is:
 
 ```bash
-jac start --host 0.0.0.0 --port ${PORT:-8000}
+jac start --no-client --host 0.0.0.0 --port ${PORT:-8000}
 ```
 
 ## Commands
@@ -22,7 +23,9 @@ jac --version
 jac install
 jac check .
 jac build
-jac start --host 0.0.0.0 --port 8000
+npm ci
+npm run build
+jac start --no-client --host 0.0.0.0 --port 8000
 ```
 
 ## Render
