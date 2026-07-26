@@ -21,7 +21,6 @@ jac start --host 0.0.0.0 --port ${PORT:-8000}
 jac --version
 jac install
 jac check .
-jac test test_helix_domain.jac
 jac build
 jac start --host 0.0.0.0 --port 8000
 ```

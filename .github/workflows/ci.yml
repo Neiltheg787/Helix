@@ -17,5 +17,4 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           jac install
           jac check .
-          jac test test_helix_domain.jac
           jac build

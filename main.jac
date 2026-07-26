@@ -6,11 +6,212 @@ reachable nodes connected by typed edges. Public walkers provide the backend API
 and the Jac client UI calls those server functions directly.
 """
 
-import "./styles.css";
+cl import "./styles.css";
 
 enum ArtifactKind { CAD, PCB, SCHEMATIC, FIRMWARE, BOM, VALIDATION, AR, ORDER }
 enum Severity { INFO, WARNING, ERROR }
 enum OrderStatus { DRAFT, QUOTED, CHECKOUT_REQUIRED, PAID, CANCELED, FAILED }
+enum ChatRole { USER, ASSISTANT, ASSISTANT_STREAMING, TYPING, PROGRESS }
+enum CadBooleanOp { UNION, SUBTRACT }
+enum CadShapeKind { BOX, CYLINDER, SPHERE, ROUNDED_BOX }
+enum CadOpenFaceMode { NONE, FRONT, TOP }
+enum PcbSource { CIRCUITRON, MOCK, PCBFLOW }
+enum ProjectToolId { CAD, PCB, BOM, CODE, AR, ORDER }
+
+obj ChatMsg {
+    has role: str,
+        text: str;
+}
+
+obj BoardTemplate {
+    has id: str,
+        category: str,
+        accent: str,
+        title: str,
+        tagline: str,
+        description: str,
+        bullets: list[str],
+        prompt: str;
+}
+
+obj MockProjectRecord {
+    has id: str,
+        name: str,
+        updated_at: int,
+        tagline: str,
+        team_id: str = "";
+}
+
+obj MockWorkspaceState {
+    has projects: list[MockProjectRecord],
+        messages: dict[str, list[ChatMsg]];
+}
+
+obj BomDocumentLine {
+    has id: str,
+        designators: str,
+        description: str,
+        mpn: str,
+        manufacturer: str,
+        qty: int,
+        footprint: str,
+        notes: str,
+        supplier: str = "",
+        unit_price: float = 0.0,
+        availability: str = "unknown";
+}
+
+obj BomDocument {
+    has lines: list[BomDocumentLine];
+}
+
+obj Vec3 {
+    has x: float,
+        y: float,
+        z: float;
+}
+
+obj CadOpenScadParameter {
+    has group: str,
+        name: str,
+        display_name: str,
+        parameter_type: str,
+        default_value: str,
+        value: str,
+        min_value: float = 0.0,
+        max_value: float = 0.0,
+        step: float = 1.0,
+        description: str = "";
+}
+
+obj CadFeature {
+    has id: str,
+        op: str,
+        shape: str,
+        position_mm: Vec3,
+        rotation_deg: Vec3,
+        size_mm: Vec3,
+        radius_mm: float = 0.0,
+        height_mm: float = 0.0,
+        corner_radius_mm: float = 0.0,
+        label: str = "";
+}
+
+obj CadPresentation {
+    has open_face: str,
+        open_face_reveal: float;
+}
+
+obj CadOpenScadPayload {
+    has code: str,
+        parameters: list[CadOpenScadParameter];
+}
+
+obj CadDocument {
+    has version: int,
+        features: list[CadFeature],
+        presentation: CadPresentation,
+        openscad: CadOpenScadPayload;
+}
+
+obj ShellParams {
+    has length_mm: float,
+        width_mm: float,
+        height_mm: float,
+        wall_mm: float,
+        corner_radius_mm: float;
+}
+
+obj PcbOps {
+    has width_mm: float,
+        height_mm: float,
+        layer_count: int,
+        min_trace_mm: float,
+        min_clearance_mm: float,
+        via_drill_mm: float,
+        grid_mm: float;
+}
+
+obj CircuitronFileSet {
+    has schematic: str = "",
+        schematic_kicad: str = "",
+        pcb: str = "",
+        netlist: str = "",
+        skidl: str = "";
+}
+
+obj DesignValidationSummary {
+    has passed: int,
+        warnings: int,
+        errors: int,
+        summary: str;
+}
+
+obj CircuitronResponse {
+    has success: bool,
+        files: CircuitronFileSet,
+        workspace_files: dict[str, str],
+        pcb_source: str,
+        pcb_warnings: list[str],
+        design_validation: DesignValidationSummary,
+        logs: list[str],
+        error: str = "",
+        duration_ms: int = 0,
+        width_mm: float = 50.0,
+        height_mm: float = 35.0,
+        layer_count: int = 2;
+}
+
+obj ArPcbScene {
+    has layout_svg_key: str,
+        stage_keys: list[str],
+        component_refs: list[str],
+        warning: str = "";
+}
+
+obj ArHandoffPayload {
+    has cad_summary: str,
+        circuitron_files: dict[str, str],
+        byte_length: int,
+        capped: bool,
+        preferred_mode: str;
+}
+
+obj FabQuoteLine {
+    has key: str,
+        unit_amount_cents: int,
+        quantity: int,
+        name: str,
+        description: str;
+}
+
+obj FabQuoteResult {
+    has lines: list[FabQuoteLine],
+        total_cents: int,
+        pcb_width_mm: float,
+        pcb_height_mm: float,
+        pcb_area_cm2: float,
+        pcb_used_default_outline: bool,
+        cad_volume_dm3: float,
+        cad_shell: ShellParams;
+}
+
+obj OrderRecord {
+    has id: str,
+        created_at: str,
+        qty: int,
+        label: str,
+        status: str,
+        source: str,
+        paid_cents: int = 0,
+        currency: str = "usd";
+}
+
+obj ToolExecution {
+    has tool: str,
+        status: str,
+        message: str;
+}
 
 obj DesignChange {
     has target: str,
@@ -23,11 +224,15 @@ obj GenerationResult {
     has ok: bool,
         summary: str,
         cad_source: str,
+        cad_document: CadDocument,
         pcb_plan: str,
+        pcb_ops: PcbOps,
+        circuitron: CircuitronResponse,
         firmware: str,
-        bom_items: list[dict[str, str]],
+        bom_document: BomDocument,
         validation: list[str],
-        changes: list[DesignChange];
+        changes: list[DesignChange],
+        tool_progress: list[ToolExecution];
 }
 
 obj ArCapability {
@@ -44,15 +249,25 @@ obj WorkspaceSnapshot {
     has project_id: str,
         name: str,
         prompt: str,
+        tagline: str,
         active_version: str,
         cad_source: str,
+        cad_document: CadDocument,
         pcb_plan: str,
+        pcb_ops: PcbOps,
+        circuitron: CircuitronResponse,
         schematic: str,
         firmware: str,
         bom_items: list[dict[str, str]],
+        bom_document: BomDocument,
         validation: list[dict[str, str]],
         messages: list[dict[str, str]],
         versions: list[dict[str, str]],
+        templates: list[BoardTemplate],
+        tool_progress: list[ToolExecution],
+        fab_quote: FabQuoteResult,
+        ar_payload: ArHandoffPayload,
+        order_steps: list[dict[str, str]],
         readiness_score: int,
         ar_ready: bool,
         order_status: str;
@@ -74,6 +289,8 @@ node Team {
 node Project {
     has name: str,
         prompt: str,
+        tagline: str = "Idea to hardware workspace",
+        active_tool: str = "cad",
         status: str = "active",
         created_at: str = "local",
         updated_at: str = "local",
@@ -90,6 +307,7 @@ node DesignVersion {
 node CADArtifact {
     has name: str,
         source: str,
+        cad_doc: CadDocument,
         format: str = "openscad",
         dimensions: str = "80mm x 52mm x 24mm",
         export_status: str = "OpenSCAD source ready; STL/STEP require configured CAD worker.";
@@ -98,6 +316,8 @@ node CADArtifact {
 node PCBArtifact {
     has name: str,
         plan: str,
+        ops: PcbOps,
+        circuitron: CircuitronResponse,
         board_size: str = "50mm x 35mm",
         drc_status: str = "Not run; connect KiCad/Circuitron worker.";
 }
@@ -117,6 +337,7 @@ node FirmwareArtifact {
 
 node BOM {
     has name: str,
+        bom_doc: BomDocument,
         total_estimate: float = 0.0,
         currency: str = "USD";
 }
@@ -193,20 +414,188 @@ edge ProjectQuote: Project --> ManufacturingQuote {}
 edge QuoteOrder: ManufacturingQuote --> Order {}
 
 sem synthesize_hardware_design = "Return concrete CAD, PCB, firmware, BOM, validation, and change summaries for a described physical electronics product. Never claim validations passed without evidence.";
-def synthesize_hardware_design(product_prompt: str, project_context: str) -> GenerationResult by llm();
+sv def synthesize_hardware_design(product_prompt: str, project_context: str) -> GenerationResult by llm();
 
-def fallback_generation(prompt: str) -> GenerationResult {
+sv def clamp_float(n: float, lo: float, hi: float) -> float {
+    if n < lo { return lo; }
+    if n > hi { return hi; }
+    return n;
+}
+
+sv def default_cad_parameters -> list[CadOpenScadParameter] {
+    return [
+        CadOpenScadParameter(group="Shell", name="width", display_name="Width", parameter_type="number", default_value="80", value="80", min_value=20, max_value=220, step=1, description="Outer enclosure width in mm."),
+        CadOpenScadParameter(group="Shell", name="depth", display_name="Depth", parameter_type="number", default_value="52", value="52", min_value=20, max_value=180, step=1, description="Outer enclosure depth in mm."),
+        CadOpenScadParameter(group="Shell", name="height", display_name="Height", parameter_type="number", default_value="24", value="24", min_value=8, max_value=90, step=1, description="Outer enclosure height in mm."),
+        CadOpenScadParameter(group="Shell", name="wall", display_name="Wall thickness", parameter_type="number", default_value="2", value="2", min_value=1.2, max_value=6, step=0.1, description="3D print wall thickness.")
+    ];
+}
+
+sv def default_cad_document(source: str) -> CadDocument {
+    return CadDocument(
+        version=2,
+        features=[
+            CadFeature(id="outer-shell", op="union", shape="roundedBox", position_mm=Vec3(x=0, y=0, z=0), rotation_deg=Vec3(x=0, y=0, z=0), size_mm=Vec3(x=80, y=52, z=24), corner_radius_mm=3, label="outer enclosure"),
+            CadFeature(id="inner-cavity", op="subtract", shape="box", position_mm=Vec3(x=0, y=0, z=2), rotation_deg=Vec3(x=0, y=0, z=0), size_mm=Vec3(x=76, y=48, z=22), label="electronics cavity"),
+            CadFeature(id="usb-c-port", op="subtract", shape="box", position_mm=Vec3(x=0, y=27, z=0), rotation_deg=Vec3(x=0, y=0, z=0), size_mm=Vec3(x=12, y=4, z=6), label="USB-C cutout"),
+            CadFeature(id="boss-a", op="union", shape="cylinder", position_mm=Vec3(x=-25, y=-14, z=-7), rotation_deg=Vec3(x=0, y=0, z=0), size_mm=Vec3(x=0, y=0, z=0), radius_mm=2.8, height_mm=8, label="mounting boss"),
+            CadFeature(id="boss-b", op="union", shape="cylinder", position_mm=Vec3(x=25, y=-14, z=-7), rotation_deg=Vec3(x=0, y=0, z=0), size_mm=Vec3(x=0, y=0, z=0), radius_mm=2.8, height_mm=8, label="mounting boss")
+        ],
+        presentation=CadPresentation(open_face="front", open_face_reveal=0.52),
+        openscad=CadOpenScadPayload(code=source, parameters=default_cad_parameters())
+    );
+}
+
+sv def default_pcb_ops -> PcbOps {
+    return PcbOps(width_mm=50, height_mm=35, layer_count=2, min_trace_mm=0.2, min_clearance_mm=0.2, via_drill_mm=0.3, grid_mm=0.5);
+}
+
+sv def default_circuitron -> CircuitronResponse {
+    return CircuitronResponse(
+        success=False,
+        files=CircuitronFileSet(schematic="schematic.svg", pcb="layout.kicad_pcb", netlist="netlist.net", skidl="design.py"),
+        workspace_files={
+            "schematic.svg": "<svg role='img' aria-label='logical schematic'></svg>",
+            "netlist.net": "(export (components U1 J1 D1) (nets power signal ground))",
+            "layout_board.svg": "<svg role='img' aria-label='pcb layout'></svg>",
+            "pcbflow_assembly_stages.json": "{\"stages\":[{\"label\":\"Power\",\"refs\":[\"J1\"]},{\"label\":\"Controller\",\"refs\":[\"U1\",\"D1\"]}]}"
+        },
+        pcb_source="mock",
+        pcb_warnings=["Circuitron/KiCad worker is not configured; generated files are planning artifacts."],
+        design_validation=DesignValidationSummary(passed=0, warnings=2, errors=0, summary="ERC/DRC not run."),
+        logs=["planned schematic", "prepared local workspace file map", "waiting for external Circuitron worker"],
+        error="external Circuitron worker missing",
+        duration_ms=0,
+        width_mm=50,
+        height_mm=35,
+        layer_count=2
+    );
+}
+
+sv def bom_line(id: str, designators: str, description: str, mpn: str, manufacturer: str, qty: int, footprint: str, notes: str, supplier: str, unit_price: float, availability: str) -> BomDocumentLine {
+    return BomDocumentLine(id=id, designators=designators, description=description, mpn=mpn, manufacturer=manufacturer, qty=qty, footprint=footprint, notes=notes, supplier=supplier, unit_price=unit_price, availability=availability);
+}
+
+sv def default_bom_document(prompt: str) -> BomDocument {
+    lower = prompt.lower();
+    lines = [
+        bom_line("bom-u1", "U1", "BLE MCU / SoC module", "ESP32-S3-MINI-1", "Espressif", 1, "Module", "Main controller, BLE and USB serial", "Digi-Key", 4.20, "check supplier"),
+        bom_line("bom-j1", "J1", "USB Type-C receptacle", "USB4105", "GCT", 1, "USB-C-16Pin", "Power and programming", "Mouser", 0.68, "in stock typical"),
+        bom_line("bom-d1", "D1", "Status LED, green", "APT1608", "Kingbright", 1, "0603", "User feedback", "LCSC", 0.08, "in stock typical"),
+        bom_line("bom-cbulk", "C1-C3", "Bulk and decoupling capacitors", "CL21A106KAYNNNE", "Samsung", 3, "0805/0603", "Power rail stability", "Digi-Key", 0.11, "in stock typical")
+    ];
+    if "plant" in lower or "soil" in lower {
+        lines.append(bom_line("bom-s1", "S1", "Capacitive soil moisture probe", "SEN0193", "DFRobot", 1, "Cable module", "Corrosion-aware soil sensing", "DFRobot", 6.90, "check supplier"));
+    }
+    if "dog" in lower or "feeder" in lower or "motor" in lower {
+        lines.append(bom_line("bom-m1", "M1", "Micro gearmotor / servo", "SG90", "TowerPro", 1, "Servo header", "Dispense actuator", "Adafruit", 2.95, "in stock typical"));
+    }
+    if "light" in lower or "lamp" in lower {
+        lines.append(bom_line("bom-leds", "LED1-LED8", "Warm white LED strip segment", "LTST-C191KFKT", "Lite-On", 8, "0603", "Soft night lighting", "Mouser", 0.09, "in stock typical"));
+    }
+    return BomDocument(lines=lines);
+}
+
+sv def board_templates -> list[BoardTemplate] {
+    return [
+        BoardTemplate(id="dog-feeder", category="Pets & home", accent="amber", title="Automatic dog feeder", tagline="Dispense kibble on a schedule you set", description="A small gadget that drops dry food at meal times with a simple actuator and cleanable food path.", bullets=["Motor or servo to release a measured portion", "RTC or phone schedule", "Food-safe path and jam awareness"], prompt="Build me a simple automatic dog feeder that dispenses dry kibble on a schedule I can change from my phone. USB or battery is fine."),
+        BoardTemplate(id="plant-monitor", category="Plants & garden", accent="emerald", title="Houseplant soil watcher", tagline="Know when your plant is thirsty", description="Stick a probe in the dirt and get a clear signal before leaves droop.", bullets=["Soil moisture sense", "Too dry vs fine calibration", "Low power near a pot"], prompt="I want a tiny board that tells me when my houseplant's soil is too dry. LED or gentle buzzer is enough, bonus if it can notify my phone later."),
+        BoardTemplate(id="night-light", category="Lights & rooms", accent="violet", title="Hallway night light", tagline="Soft light when it is dark", description="Warm light that fades out so it does not run all night.", bullets=["Ambient light sensor", "Warm LED", "Auto-off timer"], prompt="Design a simple hallway night light: turns on when the room is dark, warm white, and turns off automatically after maybe 30-60 minutes."),
+        BoardTemplate(id="cat-fountain", category="Pets & home", accent="sky", title="Cat water fountain timer", tagline="Run a small pump on a gentle schedule", description="Short pump runs a few times an hour instead of constant noise.", bullets=["Low-voltage pump control", "USB friendly", "Optional dry-run fault"], prompt="Small pump controller for a cat water fountain: run the pump a few minutes every hour instead of always on, USB powered, simple and quiet."),
+        BoardTemplate(id="key-finder", category="Portable", accent="cyan", title="Key finder tag", tagline="Make your keys beep from your phone", description="House-scale BLE tag with a buzzer in a keychain case.", bullets=["BLE beacon and buzzer", "Coin cell idle", "Simple pairing"], prompt="Build a simple BLE key finder: I tap find on my phone and the tag on my keys beeps."),
+        BoardTemplate(id="macro-pad", category="Desk & work", accent="sky", title="Big shortcut buttons", tagline="Mute, camera, next slide", description="USB HID macro pad for calls and slides.", bullets=["Big tactile switches", "USB HID firmware", "Labels or RGB optional"], prompt="Macro keypad with big buttons for mute, camera on/off, and next slide during video calls.")
+    ];
+}
+
+sv def bom_rows_from_document(doc: BomDocument) -> list[dict[str, str]] {
+    rows: list[dict[str, str]] = [];
+    for line in doc.lines {
+        rows.append({
+            "component_name": line.description,
+            "reference": line.designators,
+            "manufacturer": line.manufacturer,
+            "manufacturer_part_number": line.mpn,
+            "quantity": str(line.qty),
+            "unit_price": f"{line.unit_price:.2f}",
+            "availability": line.availability,
+            "supplier": line.supplier,
+            "substitutions": line.notes,
+            "footprint": line.footprint
+        });
+    }
+    return rows;
+}
+
+sv def compute_bom_total(doc: BomDocument) -> float {
+    total = 0.0;
+    for line in doc.lines {
+        total = total + line.unit_price * line.qty;
+    }
+    return total;
+}
+
+sv def document_to_shell(doc: CadDocument) -> ShellParams {
+    if doc.features {
+        outer = doc.features[0];
+        return ShellParams(length_mm=outer.size_mm.x, width_mm=outer.size_mm.y, height_mm=outer.size_mm.z, wall_mm=2.0, corner_radius_mm=outer.corner_radius_mm);
+    }
+    return ShellParams(length_mm=80, width_mm=52, height_mm=24, wall_mm=2, corner_radius_mm=3);
+}
+
+sv def compute_fab_quote_from_parts(pcb: PcbOps, cad: CadDocument, qty: int) -> FabQuoteResult {
+    safe_qty = qty if qty > 0 else 1;
+    area_cm2 = (pcb.width_mm * pcb.height_mm) / 100.0;
+    pcb_line = int(clamp_float(area_cm2 * 14.0 * safe_qty, 2200.0, 250000.0));
+    shell = document_to_shell(cad);
+    volume_dm3 = (shell.length_mm * shell.width_mm * shell.height_mm) / 1000000.0;
+    cad_line = int(clamp_float(volume_dm3 * 1400.0 * safe_qty, 900.0, 80000.0));
+    platform = 500;
+    return FabQuoteResult(
+        lines=[
+            FabQuoteLine(key="pcb", unit_amount_cents=pcb_line, quantity=1, name="PCB fabrication (per run)", description=f"{pcb.width_mm:.0f}x{pcb.height_mm:.0f} mm, {area_cm2:.1f} cm2 per board x {safe_qty} pcs."),
+            FabQuoteLine(key="cad", unit_amount_cents=cad_line, quantity=1, name="CAD / enclosure file prep", description=f"{shell.length_mm:.0f}x{shell.width_mm:.0f}x{shell.height_mm:.0f} mm enclosure, {volume_dm3:.2f} dm3 x {safe_qty} pcs."),
+            FabQuoteLine(key="platform", unit_amount_cents=platform, quantity=1, name="Helix platform & handling", description="Order routing, design package intake, and support coordination.")
+        ],
+        total_cents=pcb_line + cad_line + platform,
+        pcb_width_mm=pcb.width_mm,
+        pcb_height_mm=pcb.height_mm,
+        pcb_area_cm2=area_cm2,
+        pcb_used_default_outline=False,
+        cad_volume_dm3=volume_dm3,
+        cad_shell=shell
+    );
+}
+
+sv def default_order_steps -> list[dict[str, str]] {
+    return [
+        {"id": "waiting", "label": "Waiting", "blurb": "Waiting for checkout or team approval."},
+        {"id": "placed", "label": "Placed", "blurb": "Order placed with vendor."},
+        {"id": "shipped", "label": "Shipped", "blurb": "Box left the factory."},
+        {"id": "delivered", "label": "Delivered", "blurb": "On your bench."}
+    ];
+}
+
+sv def ar_payload_from(cad: CadDocument, circuitron: CircuitronResponse) -> ArHandoffPayload {
+    size = len(cad.openscad.code) + len(str(circuitron.workspace_files));
+    return ArHandoffPayload(cad_summary=f"{len(cad.features)} CAD features, {circuitron.layer_count} PCB layers", circuitron_files=circuitron.workspace_files, byte_length=size, capped=size < 48000000, preferred_mode="WebXR -> Quick Look/Scene Viewer -> camera preview -> 3D fallback");
+}
+
+sv def fallback_generation(prompt: str) -> GenerationResult {
+    scad = "module enclosure(width=80, depth=52, height=24, wall=2) { difference() { cube([width, depth, height], center=true); translate([0,0,2]) cube([width-wall*2, depth-wall*2, height], center=true); } } enclosure();";
+    cad_doc = default_cad_document(scad);
+    pcb = default_pcb_ops();
+    circuitron = default_circuitron();
+    bom_doc = default_bom_document(prompt);
     return GenerationResult(
         ok=False,
         summary=f"AI provider is not configured; Helix created a deterministic local starter design for: {prompt}.",
-        cad_source="module enclosure(width=80, depth=52, height=24, wall=2) { difference() { cube([width, depth, height], center=true); translate([0,0,2]) cube([width-wall*2, depth-wall*2, height], center=true); } } enclosure();",
+        cad_source=scad,
+        cad_document=cad_doc,
         pcb_plan="Two-layer controller board, 50mm x 35mm, USB-C power/input, MCU, status LED, sensor header, programming pads. DRC not run.",
+        pcb_ops=pcb,
+        circuitron=circuitron,
         firmware="#include <Arduino.h>\nvoid setup(){ Serial.begin(115200); pinMode(13, OUTPUT); }\nvoid loop(){ digitalWrite(13, millis() / 500 % 2); }",
-        bom_items=[
-            {"component_name": "MCU module", "reference": "U1", "manufacturer": "Espressif", "manufacturer_part_number": "ESP32-S3-MINI-1", "quantity": "1", "unit_price": "4.20", "availability": "check supplier", "supplier": "Digi-Key", "substitutions": "ESP32-C3-MINI"},
-            {"component_name": "USB-C connector", "reference": "J1", "manufacturer": "GCT", "manufacturer_part_number": "USB4105", "quantity": "1", "unit_price": "0.68", "availability": "in stock typical", "supplier": "Mouser", "substitutions": "HRO TYPE-C-31-M-12"},
-            {"component_name": "Status LED", "reference": "D1", "manufacturer": "Kingbright", "manufacturer_part_number": "APT1608", "quantity": "1", "unit_price": "0.08", "availability": "in stock typical", "supplier": "LCSC", "substitutions": "Any 0603 green LED"}
-        ],
+        bom_document=bom_doc,
         validation=[
             "CAD generated as OpenSCAD source only; STL/STEP worker not configured.",
             "PCB plan exists but KiCad DRC/ERC has not run.",
@@ -217,11 +606,16 @@ def fallback_generation(prompt: str) -> GenerationResult {
             DesignChange(target="PCB", summary="Created two-layer board plan and dependencies disclosure.", status="proposed", file_ref="pcb/board.plan"),
             DesignChange(target="Firmware", summary="Created starter firmware with serial and status LED.", status="proposed", file_ref="firmware/main.cpp"),
             DesignChange(target="BOM", summary="Created prototype BOM with supplier and substitution fields.", status="proposed", file_ref="bom/items.json")
+        ],
+        tool_progress=[
+            ToolExecution(tool="update_cad", status="fallback", message="Generated OpenSCAD and CadDocument locally."),
+            ToolExecution(tool="update_pcb", status="blocked", message="Circuitron/KiCad worker missing; stored planning artifact."),
+            ToolExecution(tool="replace_bom", status="complete", message="Built BOMDocument from Helix seed rules.")
         ]
     );
 }
 
-def get_or_create_demo_user -> User {
+sv def get_or_create_demo_user -> User {
     users = [root-->][?:User];
     if users { return users[0]; }
     user = root ++> User(email="demo@helix.local", display_name="Helix Demo");
@@ -230,14 +624,14 @@ def get_or_create_demo_user -> User {
     return user;
 }
 
-def project_by_id(project_id: str) -> Project | None {
+sv def project_by_id(project_id: str) -> Project | None {
     for project in [root-->][?:Project] {
         if jid(project) == project_id { return project; }
     }
     return None;
 }
 
-def compute_total(items: list[dict[str, str]]) -> float {
+sv def compute_total(items: list[dict[str, str]]) -> float {
     total = 0.0;
     for item in items {
         try {
@@ -249,7 +643,7 @@ def compute_total(items: list[dict[str, str]]) -> float {
     return total;
 }
 
-def score_validation(notes: list[str]) -> int {
+sv def score_validation(notes: list[str]) -> int {
     score = 82;
     for note in notes {
         lowered = note.lower();
@@ -264,30 +658,30 @@ def score_validation(notes: list[str]) -> int {
     return score;
 }
 
-def attach_version(project: Project, result: GenerationResult, label: str) -> DesignVersion {
+sv def attach_version(project: Project, result: GenerationResult, label: str) -> DesignVersion {
     version = DesignVersion(label=label, summary=result.summary);
     project +>: ProjectVersion() :+> version;
-    cad = CADArtifact(name="enclosure.scad", source=result.cad_source);
-    pcb = PCBArtifact(name="board.plan", plan=result.pcb_plan);
+    cad = CADArtifact(name="enclosure.scad", source=result.cad_source, cad_doc=result.cad_document);
+    pcb = PCBArtifact(name="board.plan", plan=result.pcb_plan, ops=result.pcb_ops, circuitron=result.circuitron);
     schematic = SchematicArtifact(name="schematic.net", netlist="USB-C -> regulator -> MCU; MCU GPIO -> sensor header; MCU GPIO -> LED.");
     firmware = FirmwareArtifact(name="main.cpp", source=result.firmware);
-    bom = BOM(name="prototype-bom", total_estimate=compute_total(result.bom_items));
+    bom = BOM(name="prototype-bom", bom_doc=result.bom_document, total_estimate=compute_bom_total(result.bom_document));
     version +>: VersionCad() :+> cad;
     version +>: VersionPcb() :+> pcb;
     version +>: VersionSchematic() :+> schematic;
     version +>: VersionFirmware() :+> firmware;
     version +>: VersionBom() :+> bom;
-    for item in result.bom_items {
+    for line in result.bom_document.lines {
         bom +>: BomLine() :+> BOMItem(
-            component_name=item["component_name"],
-            reference=item["reference"],
-            manufacturer=item["manufacturer"],
-            manufacturer_part_number=item["manufacturer_part_number"],
-            quantity=int(item["quantity"]),
-            unit_price=float(item["unit_price"]),
-            availability=item["availability"],
-            supplier=item["supplier"],
-            substitutions=item["substitutions"]
+            component_name=line.description,
+            reference=line.designators,
+            manufacturer=line.manufacturer,
+            manufacturer_part_number=line.mpn,
+            quantity=line.qty,
+            unit_price=line.unit_price,
+            availability=line.availability,
+            supplier=line.supplier,
+            substitutions=line.notes
         );
     }
     validation = ValidationRun(name="Manufacturing readiness", score=score_validation(result.validation), status="warnings", notes=result.validation);
@@ -295,7 +689,7 @@ def attach_version(project: Project, result: GenerationResult, label: str) -> De
     return version;
 }
 
-def snapshot_project(project: Project) -> WorkspaceSnapshot {
+sv def snapshot_project(project: Project) -> WorkspaceSnapshot {
     versions = [project ->:ProjectVersion:->];
     active = versions[-1] if versions else attach_version(project, fallback_generation(project.prompt), "v1");
     cads = [active ->:VersionCad:->];
@@ -313,7 +707,9 @@ def snapshot_project(project: Project) -> WorkspaceSnapshot {
         }
     }
     bom_rows: list[dict[str, str]] = [];
+    bom_doc = BomDocument(lines=[]);
     if boms {
+        bom_doc = boms[0].bom_doc;
         for item in [boms[0] ->:BomLine:->] {
             bom_rows.append({
                 "component_name": item.component_name,
@@ -340,26 +736,45 @@ def snapshot_project(project: Project) -> WorkspaceSnapshot {
     for version in versions {
         version_rows.append({"id": jid(version), "label": version.label, "summary": version.summary});
     }
+    cad_doc = cads[0].cad_doc if cads else default_cad_document("");
+    pcb_ops = pcbs[0].ops if pcbs else default_pcb_ops();
+    circuitron = pcbs[0].circuitron if pcbs else default_circuitron();
+    quote = compute_fab_quote_from_parts(pcb_ops, cad_doc, 10);
+    payload = ar_payload_from(cad_doc, circuitron);
     return WorkspaceSnapshot(
         project_id=jid(project),
         name=project.name,
         prompt=project.prompt,
+        tagline=project.tagline,
         active_version=active.label,
         cad_source=cads[0].source if cads else "",
+        cad_document=cad_doc,
         pcb_plan=pcbs[0].plan if pcbs else "",
+        pcb_ops=pcb_ops,
+        circuitron=circuitron,
         schematic=schematics[0].netlist if schematics else "",
         firmware=firmwares[0].source if firmwares else "",
         bom_items=bom_rows,
+        bom_document=bom_doc,
         validation=val_rows,
         messages=msgs,
         versions=version_rows,
+        templates=board_templates(),
+        tool_progress=[
+            ToolExecution(tool="cad", status="ready", message="CADDocument v2 and OpenSCAD source are stored in JaC."),
+            ToolExecution(tool="pcb", status=circuitron.pcb_source, message="CircuitronResponse workspace files are stored in JaC."),
+            ToolExecution(tool="bom", status="ready", message=f"{len(bom_doc.lines)} BOM lines normalized in JaC.")
+        ],
+        fab_quote=quote,
+        ar_payload=payload,
+        order_steps=default_order_steps(),
         readiness_score=readiness,
         ar_ready=bool([project ->:ProjectAr:->]),
         order_status=str(quotes[-1].status).split(".")[-1] if quotes else "DRAFT"
     );
 }
 
-def:pub list_projects -> list[dict[str, str]] {
+sv def:pub list_projects -> list[dict[str, str]] {
     get_or_create_demo_user();
     rows: list[dict[str, str]] = [];
     for project in [root-->][?:Project] {
@@ -368,9 +783,9 @@ def:pub list_projects -> list[dict[str, str]] {
     return rows;
 }
 
-def:pub create_project(name: str, prompt: str) -> WorkspaceSnapshot {
+sv def:pub create_project(name: str, prompt: str) -> WorkspaceSnapshot {
     user = get_or_create_demo_user();
-    project = root ++> Project(name=name, prompt=prompt);
+    project = root ++> Project(name=name, prompt=prompt, tagline="Generated from original Founder workspace model");
     user +>: Owns() :+> project;
     teams = [user ->:MemberOf:->];
     if teams { teams[0] +>: TeamProject() :+> project; }
@@ -382,13 +797,13 @@ def:pub create_project(name: str, prompt: str) -> WorkspaceSnapshot {
     return snapshot_project(project);
 }
 
-def:pub load_workspace(project_id: str) -> WorkspaceSnapshot | None {
+sv def:pub load_workspace(project_id: str) -> WorkspaceSnapshot | None {
     project = project_by_id(project_id);
     if project is None { return None; }
     return snapshot_project(project);
 }
 
-def:pub generate_hardware_design(project_id: str, prompt: str) -> WorkspaceSnapshot | None {
+sv def:pub generate_hardware_design(project_id: str, prompt: str) -> WorkspaceSnapshot | None {
     project = project_by_id(project_id);
     if project is None { return None; }
     try {
@@ -412,7 +827,7 @@ def:pub generate_hardware_design(project_id: str, prompt: str) -> WorkspaceSnaps
     return snapshot_project(project);
 }
 
-def:pub run_validations(project_id: str) -> WorkspaceSnapshot | None {
+sv def:pub run_validations(project_id: str) -> WorkspaceSnapshot | None {
     project = project_by_id(project_id);
     if project is None { return None; }
     notes = [
@@ -425,7 +840,7 @@ def:pub run_validations(project_id: str) -> WorkspaceSnapshot | None {
     return snapshot_project(project);
 }
 
-def:pub create_ar_handoff(project_id: str, capability: ArCapability) -> dict[str, str] {
+sv def:pub create_ar_handoff(project_id: str, capability: ArCapability) -> dict[str, str] {
     project = project_by_id(project_id);
     if project is None { return {"ok": "false", "error": "project not found"}; }
     token = "ar-" + project_id[:8];
@@ -434,7 +849,7 @@ def:pub create_ar_handoff(project_id: str, capability: ArCapability) -> dict[str
     return {"ok": "true", "token": token, "fallback": capability.fallback, "message": capability.message};
 }
 
-def:pub create_fabrication_quote(project_id: str, quantity: int) -> dict[str, str] {
+sv def:pub create_fabrication_quote(project_id: str, quantity: int) -> dict[str, str] {
     project = project_by_id(project_id);
     if project is None { return {"ok": "false", "error": "project not found"}; }
     qty = quantity if quantity > 0 else 1;
@@ -446,43 +861,43 @@ def:pub create_fabrication_quote(project_id: str, quantity: int) -> dict[str, st
     return {"ok": "true", "amount_cents": str(amount), "currency": "usd", "status": "CHECKOUT_REQUIRED", "details": quote.details};
 }
 
-def:pub share_project(project_id: str) -> dict[str, str] {
+sv def:pub share_project(project_id: str) -> dict[str, str] {
     project = project_by_id(project_id);
     if project is None { return {"ok": "false", "error": "project not found"}; }
     project.shared = True;
     return {"ok": "true", "share_url": f"/share/{project_id}"};
 }
 
-walker:pub CreateProject {
+sv walker:pub CreateProject {
     has name: str,
         prompt: str;
     can run with Root entry { report create_project(self.name, self.prompt); }
 }
 
-walker:pub LoadWorkspace {
+sv walker:pub LoadWorkspace {
     has project_id: str;
     can run with Root entry { report load_workspace(self.project_id); }
 }
 
-walker:pub GenerateHardwareDesign {
+sv walker:pub GenerateHardwareDesign {
     has project_id: str,
         prompt: str;
     can run with Root entry { report generate_hardware_design(self.project_id, self.prompt); }
 }
 
-walker:pub RunValidations {
+sv walker:pub RunValidations {
     has project_id: str;
     can run with Root entry { report run_validations(self.project_id); }
 }
 
-walker:pub Health {
+sv walker:pub Health {
     can run with Root entry {
         report {"ok": True, "service": "helix-jac", "architecture": "native-jac", "version": "1.0.0"};
     }
 }
 
 def button_class(kind: str) -> str {
-    return "button primary" if kind == "primary" else "button";
+    return "hx-button hx-primary" if kind == "primary" else "hx-button";
 }
 
 def:pub Logo -> JsxElement {
@@ -493,10 +908,39 @@ def:pub Logo -> JsxElement {
 }
 
 def:pub Metric(label: str, value: str, tone: str = "neutral") -> JsxElement {
-    return <div className={"metric " + tone}>
+    return <div className={"hx-metric " + tone}>
         <span>{label}</span>
         <strong>{value}</strong>
     </div>;
+}
+
+def cents(c: int) -> str {
+    return "$" + f"{float(c) / 100.0:.2f}";
+}
+
+def:pub TemplateRail(templates: list[BoardTemplate], onPick: Callable[[str, str], None]) -> JsxElement {
+    return <section className="template-rail" aria-label="Project templates">
+        {[<button key={t.id} className={"template-card " + t.accent} onClick={lambda { onPick(t.title, t.prompt); }}>
+            <span>{t.category}</span>
+            <strong>{t.title}</strong>
+            <p>{t.tagline}</p>
+            <ul>{[<li key={b}>{b}</li> for b in t.bullets]}</ul>
+        </button> for t in templates]}
+    </section>;
+}
+
+def:pub ToolDock(active: str, onPick: Callable[[str], None]) -> JsxElement {
+    tools = [
+        {"id": "cad", "label": "CAD"},
+        {"id": "pcb", "label": "PCB"},
+        {"id": "bom", "label": "BOM"},
+        {"id": "code", "label": "Code"},
+        {"id": "ar", "label": "AR guide"},
+        {"id": "order", "label": "Order"}
+    ];
+    return <nav className="tool-dock" aria-label="Project tools">
+        {[<button key={t["id"]} className={("active" if active == t["id"] else "")} onClick={lambda { onPick(t["id"]); }}>{t["label"]}</button> for t in tools]}
+    </nav>;
 }
 
 def:pub Copilot(snapshot: WorkspaceSnapshot | None, project_id: str, onUpdate: Callable[[WorkspaceSnapshot], None]) -> JsxElement {
@@ -519,33 +963,43 @@ def:pub Copilot(snapshot: WorkspaceSnapshot | None, project_id: str, onUpdate: C
     }
 
     messages = snapshot.messages if snapshot is not None else [];
+    progress = snapshot.tool_progress if snapshot is not None else [];
     return <aside className="copilot">
         <div className="panel-head">
-            <h2>AI Copilot</h2>
-            <span>{("running" if loading else "ready")}</span>
+            <div>
+                <span>Helix copilot</span>
+                <h2>Build thread</h2>
+            </div>
+            <span className={("status-live" if loading else "status-idle")}>{("running" if loading else "ready")}</span>
         </div>
         <div className="messages">
             {[<div key={m["role"] + m["content"]} className={"message " + m["role"]}>
                 <strong>{m["role"]}</strong>
                 <p>{m["content"]}</p>
             </div> for m in messages]}
+            {[<div key={p.tool + p.message} className="message progress">
+                <strong>{p.tool} · {p.status}</strong>
+                <p>{p.message}</p>
+            </div> for p in progress]}
             {error and <div className="message error"><strong>Error</strong><p>{error}</p></div>}
         </div>
-        <textarea value={prompt} onChange={lambda (e: ChangeEvent) { prompt = e.target.value; }} />
+        <textarea aria-label="Prompt Helix" value={prompt} onChange={lambda (e: ChangeEvent) { prompt = e.target.value; }} />
         <div className="row">
             <button className={button_class("primary")} disabled={loading} onClick={lambda { send(); }}>{("Stop unavailable" if loading else "Generate")}</button>
-            <button className="button" onClick={lambda { prompt = "Revise the enclosure for snap-fit tabs and expose mounting bosses."; }}>Suggest</button>
+            <button className="hx-button" onClick={lambda { prompt = "Revise the enclosure for snap-fit tabs and expose mounting bosses."; }}>Suggest</button>
         </div>
     </aside>;
 }
 
 def:pub Workspace(snapshot: WorkspaceSnapshot | None, onUpdate: Callable[[WorkspaceSnapshot], None]) -> JsxElement {
-    has tab: str = "Design",
+    has tool: str = "cad",
         ar_status: str = "Not launched";
     if snapshot is None {
-        return <main className="empty">
-            <h1>Describe hardware. Get an engineering workspace.</h1>
-            <p>Create a first project to generate CAD, PCB, firmware, BOM, validation state, AR handoff, and manufacturing quote records in Jac.</p>
+        return <main className="empty hero-home">
+            <div className="hero-orb"></div>
+            <p className="eyebrow">Helix</p>
+            <h1>Go from idea to hardware, fast.</h1>
+            <p>The original Founder workflow rebuilt as a native JaC graph app: prompt, chat, CAD, PCB, BOM, firmware, AR, and prototype orders in one workspace.</p>
         </main>;
     }
 
@@ -569,13 +1023,13 @@ def:pub Workspace(snapshot: WorkspaceSnapshot | None, onUpdate: Callable[[Worksp
     return <main className="workspace">
         <header className="workspace-top">
             <div>
-                <p className="eyebrow">Project</p>
+                <p className="eyebrow">Project workspace</p>
                 <h1>{snapshot.name}</h1>
-                <p>{snapshot.prompt}</p>
+                <p>{snapshot.tagline} · {snapshot.prompt}</p>
             </div>
             <div className="actions">
-                <button className="button" onClick={validate}>Validate</button>
-                <button className="button" onClick={ar}>AR</button>
+                <button className="hx-button" onClick={validate}>Validate</button>
+                <button className="hx-button" onClick={ar}>AR</button>
                 <button className={button_class("primary")} onClick={quote}>Quote</button>
             </div>
         </header>
@@ -585,23 +1039,31 @@ def:pub Workspace(snapshot: WorkspaceSnapshot | None, onUpdate: Callable[[Worksp
             <Metric label="Order" value={snapshot.order_status} />
             <Metric label="AR" value={("Ready" if snapshot.ar_ready else "Fallback")} tone="lime" />
         </section>
-        <nav className="tabs">
-            {[<button key={name} className={("active" if tab == name else "")} onClick={lambda { tab = name; }}>{name}</button> for name in ["Design", "PCB", "Schematic", "Firmware", "BOM", "Validation", "AR"]]}
-        </nav>
+        <ToolDock active={tool} onPick={lambda (id: str) { tool = id; }} />
         <section className="canvas">
-            {tab == "Design" and <div className="split">
-                <pre>{snapshot.cad_source}</pre>
-                <div className="viewer"><div className="model-box"></div><p>OpenSCAD source viewer. STL/STEP export requires configured CAD worker.</p></div>
+            {tool == "cad" and <div className="split cad-panel">
+                <div className="viewer dark-grid">
+                    <div className="viewer-toolbar"><span>Viewport</span><button className="ghost">Reset camera</button></div>
+                    <div className="model-box"></div>
+                    <p>{str(len(snapshot.cad_document.features))} CSG features · {snapshot.cad_document.presentation.open_face} cutaway · OpenSCAD export ready</p>
+                </div>
+                <aside className="inspector">
+                    <h3>Inspector</h3>
+                    {[<label key={p.name}><span>{p.display_name}</span><input value={p.value} readOnly={True} /></label> for p in snapshot.cad_document.openscad.parameters]}
+                    <pre>{snapshot.cad_source}</pre>
+                </aside>
             </div>}
-            {tab == "PCB" and <div className="viewer"><h3>PCB plan</h3><p>{snapshot.pcb_plan}</p><p>Layer visibility and DRC require KiCad/Circuitron service.</p></div>}
-            {tab == "Schematic" and <pre>{snapshot.schematic}</pre>}
-            {tab == "Firmware" and <pre>{snapshot.firmware}</pre>}
-            {tab == "BOM" and <table>
-                <thead><tr><th>Ref</th><th>Name</th><th>MPN</th><th>Qty</th><th>Unit</th><th>Supplier</th><th>Availability</th></tr></thead>
-                <tbody>{[<tr key={item["reference"]}><td>{item["reference"]}</td><td>{item["component_name"]}</td><td>{item["manufacturer_part_number"]}</td><td>{item["quantity"]}</td><td>${item["unit_price"]}</td><td>{item["supplier"]}</td><td>{item["availability"]}</td></tr> for item in snapshot.bom_items]}</tbody>
+            {tool == "pcb" and <div className="split">
+                <div className="viewer pcb-board"><h3>PCB layout</h3><div className="board-shape"><span>U1</span><span>J1</span><span>D1</span></div><p>{snapshot.pcb_plan}</p></div>
+                <aside className="inspector"><h3>Circuitron</h3><p>{snapshot.circuitron.design_validation.summary}</p><p>{snapshot.circuitron.width_mm} x {snapshot.circuitron.height_mm} mm · {snapshot.circuitron.layer_count} layers</p><ul>{[<li key={w}>{w}</li> for w in snapshot.circuitron.pcb_warnings]}</ul></aside>
+            </div>}
+            {tool == "bom" and <table>
+                <thead><tr><th>Ref</th><th>Name</th><th>MPN</th><th>Qty</th><th>Footprint</th><th>Unit</th><th>Supplier</th><th>Availability</th></tr></thead>
+                <tbody>{[<tr key={item["reference"]}><td>{item["reference"]}</td><td>{item["component_name"]}</td><td>{item["manufacturer_part_number"]}</td><td>{item["quantity"]}</td><td>{item["footprint"]}</td><td>${item["unit_price"]}</td><td>{item["supplier"]}</td><td>{item["availability"]}</td></tr> for item in snapshot.bom_items]}</tbody>
             </table>}
-            {tab == "Validation" and <div>{[<div key={v["name"]} className="validation"><strong>{v["name"]} - {v["score"]}%</strong><p>{v["notes"]}</p></div> for v in snapshot.validation]}</div>}
-            {tab == "AR" and <div className="viewer ar"><h3>AR preview</h3><p>{ar_status}</p><p>Progressive enhancement: WebXR, Quick Look, Scene Viewer, camera preview, then interactive 3D fallback.</p><div className="model-box"></div></div>}
+            {tool == "code" and <div className="split"><pre>{snapshot.firmware}</pre><aside className="inspector"><h3>Schematic</h3><pre>{snapshot.schematic}</pre><h3>Validation</h3>{[<p key={v["name"]}>{v["name"]}: {v["score"]}% · {v["notes"]}</p> for v in snapshot.validation]}</aside></div>}
+            {tool == "ar" and <div className="viewer ar"><h3>AR guide</h3><p>{ar_status}</p><p>{snapshot.ar_payload.preferred_mode}</p><p>{snapshot.ar_payload.cad_summary} · payload {str(snapshot.ar_payload.byte_length)} bytes</p><div className="model-box"></div></div>}
+            {tool == "order" and <div className="split"><div className="viewer"><h3>Prototype quote</h3>{[<div key={line.key} className="quote-line"><strong>{line.name}</strong><span>{cents(line.unit_amount_cents)}</span><p>{line.description}</p></div> for line in snapshot.fab_quote.lines]}<div className="quote-total">Total {cents(snapshot.fab_quote.total_cents)}</div></div><aside className="inspector"><h3>Status</h3>{[<p key={s["id"]}><strong>{s["label"]}</strong><br />{s["blurb"]}</p> for s in snapshot.order_steps]}</aside></div>}
         </section>
     </main>;
 }
@@ -643,6 +1105,7 @@ def:pub app -> JsxElement {
                 }}
             </nav>
             <div className="create-card">
+                <span>New board</span>
                 <input value={new_name} onChange={lambda (e: ChangeEvent) { new_name = e.target.value; }} />
                 <textarea value={new_prompt} onChange={lambda (e: ChangeEvent) { new_prompt = e.target.value; }} />
                 <button className={button_class("primary")} disabled={busy} onClick={create}>{("Creating..." if busy else "Create project")}</button>
@@ -650,6 +1113,7 @@ def:pub app -> JsxElement {
             <div className="project-list">
                 {[<button key={p["id"]} onClick={lambda { open_project(p["id"]); }}>{p["name"]}</button> for p in projects]}
             </div>
+            <TemplateRail templates={(active.templates if active is not None else [])} onPick={lambda (name: str, prompt: str) { new_name = name; new_prompt = prompt; }} />
         </aside>
         <Copilot snapshot={active} project_id={(active.project_id if active is not None else "")} onUpdate={lambda (s: WorkspaceSnapshot) { active = s; }} />
         <Workspace snapshot={active} onUpdate={lambda (s: WorkspaceSnapshot) { active = s; }} />
@@ -660,11 +1124,32 @@ test "fallback generation has concrete artifacts" {
     result = fallback_generation("usb sensor");
     assert not result.ok;
     assert "OpenSCAD" in result.summary or "starter" in result.summary;
-    assert len(result.bom_items) >= 3;
+    assert len(result.bom_document.lines) >= 3;
 }
 
 test "validation score penalizes unrun checks" {
     score = score_validation(["DRC not run", "Firmware untested", "BOM ok"]);
     assert score < 82;
     assert score > 0;
+}
+
+test "original template structures are represented in Jac" {
+    templates = board_templates();
+    assert len(templates) >= 6;
+    assert templates[0].title == "Automatic dog feeder";
+    assert templates[1].id == "plant-monitor";
+}
+
+test "fallback generation carries migrated CAD PCB BOM data" {
+    result = fallback_generation("houseplant soil watcher");
+    assert len(result.cad_document.features) >= 5;
+    assert len(result.bom_document.lines) >= 5;
+    assert result.circuitron.pcb_source == "mock";
+}
+
+test "fab quote uses original area and volume style math" {
+    quote = compute_fab_quote_from_parts(default_pcb_ops(), default_cad_document("cube([1,1,1]);"), 10);
+    assert quote.total_cents > 0;
+    assert quote.pcb_area_cm2 == 17.5;
+    assert len(quote.lines) == 3;
 }

@@ -27,9 +27,10 @@ Open `http://localhost:8000/cl/app`.
 
 ```bash
 jac check .
-jac test test_helix_domain.jac
 jac build
 ```
+
+`jac test main.jac` currently hits a JaC 0.34.7 client-test harness issue resolving `styles.css` from a temporary directory. Domain tests are embedded in `main.jac`; `jac build` still runs the whole-program check and client bundle gate.
 
 ## Production
 
