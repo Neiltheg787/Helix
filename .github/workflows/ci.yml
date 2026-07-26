@@ -1,0 +1,21 @@
+name: Helix Jac CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  jac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Jac
+        run: curl -fsSL https://raw.githubusercontent.com/jaseci-labs/jaseci/main/scripts/install.sh | bash
+      - name: Validate
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          jac install
+          jac check .
+          jac test test_helix_domain.jac
+          jac build

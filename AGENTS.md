@@ -1,5 +1,9 @@
-<!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+# Helix Jac Instructions
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
-<!-- END:nextjs-agent-rules -->
+Helix is a native Jac full-stack project. Keep application logic in `.jac` files.
+
+- Use `~/.local/bin/jac check .` before committing.
+- Use `~/.local/bin/jac test` for domain tests.
+- Use `~/.local/bin/jac build` to build the Jac client/server bundle.
+- Do not reintroduce Next.js as the backend.
+- Keep browser-only AR/WebXR/camera code inside Jac client code or small documented interop modules.
