@@ -18,7 +18,7 @@ jobs:
           jac install
           jac check .
           jac build
-      - name: Build React UI
+      - name: Build Next UI
         run: |
           npm ci
           npm run build

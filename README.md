@@ -1,18 +1,20 @@
 # Helix
 
-Helix is a JaC-backed hardware engineering app with a production React UI. JaC owns the backend API, graph persistence model, AI orchestration, project/version/artifact topology, CAD/PCB/BOM/AR/order data structures, and walkers. React/TypeScript owns the polished browser UI.
+Helix is a JaC-backed hardware engineering app with a production Next.js/TypeScript UI. JaC owns the backend API, graph persistence model, AI orchestration, project/version/artifact topology, CAD/PCB/BOM/AR/order data structures, and walkers. Next.js owns the polished browser UI only.
 
 ## Architecture
 
 - `main.jac`: Jac nodes, typed edges, walkers, `def:pub` APIs, AI structured-output functions, and backend domain structures.
-- `ui/src`: React/TypeScript UI that calls the JaC `/function/*` and `/walker/*` endpoints.
-- `package.json`, `vite.config.ts`: UI development/build tooling.
+- `app/page.tsx`: production Next.js workspace UI that calls the JaC `/function/*` and `/walker/*` endpoints.
+- `app/globals.css`: frontend design system, responsive layout, and restrained motion.
+- `next.config.mjs`: frontend rewrites to the JaC API service; no Next API routes are used.
+- `package.json`: UI development/build tooling.
 - `styles.css`: legacy JaC client styling kept for the built-in JaC app shell.
 - `test_helix_domain.jac`: Jac tests for graph domain behavior.
 - `jac.toml`: Jac project, npm interop, byLLM, client, and serve config.
 - `Dockerfile`: production Jac service container.
 
-The application is intentionally not a Next.js backend. In the preferred split mode, `jac start --no-client` serves the API and Vite serves the React UI. Public walkers are available under `/walker/<Name>`, and public functions are under `/function/<name>`.
+The application is intentionally not a Next.js backend. In the preferred split mode, `jac start --no-client` serves the API and Next.js serves the UI. Public walkers are available under `/walker/<Name>`, and public functions are under `/function/<name>`.
 
 ## Local Development
 
@@ -35,7 +37,7 @@ Start the UI:
 npm run dev
 ```
 
-Open `http://localhost:5173`.
+Open `http://localhost:3000`.
 
 ## Validation
 
@@ -56,9 +58,9 @@ docker build -t helix-jac .
 docker run -p 8000:8000 --env-file .env helix-jac
 ```
 
-If a static marketing shell is deployed to Vercel later, it should call this Jac service over HTTPS. The Jac backend should not be replaced by `next build`.
+If the Next UI is deployed to Vercel, it should call this Jac service over HTTPS. The Jac backend should not be replaced by Next API routes or client-only mocks.
 
-The project now has a `package.json` on purpose for the React UI. It is not a Next.js app and must not run `next build`.
+The project has a `package.json` on purpose for the Next.js UI. `npm run build` builds only the frontend; JaC remains the backend service.
 
 ## AR Notes
 
@@ -70,9 +72,9 @@ Current local build exposes the AR workflow and records handoffs. Real plane tra
 
 ## Non-Jac Code
 
-- `ui/src`: React/TypeScript UI.
+- `app/page.tsx`, `app/layout.tsx`, `app/globals.css`: Next.js/TypeScript UI.
 - `styles.css`: legacy JaC client presentation.
 - `Dockerfile`: production container definition.
 - GitHub workflow YAML: CI configuration.
 
-Current target split is roughly 60% JaC backend/domain and 40% React/TypeScript UI.
+Current target split is roughly 60% JaC backend/domain and 40% Next.js/TypeScript UI.

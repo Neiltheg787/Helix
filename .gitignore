@@ -1,7 +1,9 @@
 .jac/
+.next/
 node_modules/
 dist/
 dist-ui/
+work/
 tsconfig.tsbuildinfo
 .env
 .env.*

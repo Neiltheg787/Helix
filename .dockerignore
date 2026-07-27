@@ -1,5 +1,6 @@
 .git
 .jac
+.next
 dist
 dist-ui
 node_modules

@@ -2,15 +2,15 @@
 
 ## Supported Topology
 
-Helix runs as a native Jac API service plus a static React UI.
+Helix runs as a native Jac API service plus a Next.js frontend UI.
 
 1. Build and run the Jac backend on a container platform such as Render, Fly.io, Railway, ECS, or Kubernetes.
-2. Build the React UI with `npm run build`.
-3. Deploy `dist-ui/` to a static host and set `VITE_HELIX_API_URL` to the public JaC backend URL.
+2. Build the Next.js UI with `npm run build`.
+3. Deploy the frontend to Vercel or another Next-compatible host and set `HELIX_JAC_ORIGIN` or `NEXT_PUBLIC_HELIX_API_URL` to the public JaC backend URL.
 4. Terminate HTTPS at the platform or reverse proxy.
 5. Configure optional worker URLs through environment variables.
 
-The repository root intentionally contains `package.json` only for the Vite UI. It does not contain `next.config.*`, `src/`, `app/`, or `pages/`, and production is not a Node/Next build. The supported backend entrypoint is:
+The repository root intentionally contains `package.json`, `app/`, and `next.config.mjs` only for the frontend. It does not contain Next API routes, and production backend behavior is not a Node/Next build. The supported backend entrypoint is:
 
 ```bash
 jac start --no-client --host 0.0.0.0 --port ${PORT:-8000}
@@ -63,4 +63,4 @@ Expected report:
 
 ## CORS
 
-For managed deployment, configure the reverse proxy or platform CORS layer to allow the production frontend origin to call `/walker/*` and `/function/*` endpoints over HTTPS.
+For managed deployment, configure `HELIX_JAC_ORIGIN` for Next rewrites or configure the Jac reverse proxy/CORS layer to allow the production frontend origin to call `/walker/*` and `/function/*` endpoints over HTTPS.
