@@ -78,4 +78,4 @@ Current local build exposes the AR workflow and records handoffs. Real plane tra
 - `Dockerfile`: production container definition.
 - GitHub workflow YAML: CI configuration.
 
-The executable-source split is now about 52% JaC and 48% Next.js/TypeScript by physical lines and bytes. CSS is reported separately because it is presentation, not application logic.
+The executable-source split is now about 61% JaC and 39% Next.js/TypeScript by physical lines and bytes. CSS is reported separately because it is presentation, not application logic.

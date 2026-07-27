@@ -317,6 +317,79 @@ obj ProjectActivityRow {
         created_at: str;
 }
 
+obj ProjectSearchResult {
+    has project_id: str,
+        name: str,
+        tagline: str,
+        status: str,
+        match: str,
+        version_count: int,
+        readiness_score: int,
+        updated_at: str;
+}
+
+obj ArtifactManifestRow {
+    has project_id: str,
+        version_id: str,
+        version_label: str,
+        artifact_type: str,
+        filename: str,
+        format: str,
+        status: str,
+        source: str,
+        byte_length: int;
+}
+
+obj CollaborationSnapshot {
+    has project_id: str,
+        shared: bool,
+        team_name: str,
+        member_count: int,
+        activity_count: int,
+        access_mode: str,
+        last_activity: str;
+}
+
+obj OrderHistoryRow {
+    has order_id: str,
+        quote_id: str,
+        status: str,
+        quantity: int,
+        amount_cents: int,
+        currency: str,
+        provider: str,
+        created_at: str,
+        detail: str;
+}
+
+obj DependencyDisclosure {
+    has key: str,
+        feature: str,
+        available: bool,
+        required: bool,
+        owner: str,
+        message: str;
+}
+
+obj ProjectHealthReport {
+    has project_id: str,
+        project_name: str,
+        status: str,
+        score: int,
+        active_version: str,
+        artifact_count: int,
+        blockers: list[str],
+        checks: list[dict[str, str]];
+}
+
+obj ProjectCommand {
+    has key: str,
+        label: str,
+        category: str,
+        enabled: bool,
+        reason: str;
+}
+
 node User {
     has email: str,
         display_name: str,
@@ -1316,6 +1389,589 @@ sv def:pub project_graph_stats(project_id: str) -> dict[str, str] {
     };
 }
 
+sv def project_version_row(project: Project, version: DesignVersion) -> dict[str, str] {
+    cads = [version ->:VersionCad:->];
+    pcbs = [version ->:VersionPcb:->];
+    schematics = [version ->:VersionSchematic:->];
+    firmwares = [version ->:VersionFirmware:->];
+    boms = [version ->:VersionBom:->];
+    artifact_count = len(cads) + len(pcbs) + len(schematics) + len(firmwares) + len(boms);
+    active = project.active_version_id == jid(version);
+    return {
+        "id": jid(version),
+        "project_id": jid(project),
+        "label": version.label,
+        "summary": version.summary,
+        "created_at": version.created_at,
+        "committed": str(version.committed),
+        "active": str(active),
+        "artifact_count": str(artifact_count),
+        "cad_features": str(len(cads[0].cad_doc.features) if cads else 0),
+        "bom_lines": str(len(boms[0].bom_doc.lines) if boms else 0)
+    };
+}
+
+sv def:pub project_version_rows(project_id: str) -> list[dict[str, str]] {
+    project = project_by_id(project_id);
+    if project is None { return []; }
+    rows: list[dict[str, str]] = [];
+    for version in [project ->:ProjectVersion:->] {
+        rows.append(project_version_row(project, version));
+    }
+    return rows;
+}
+
+sv def search_match(project: Project, query: str) -> str {
+    lowered = query.lower();
+    if not lowered { return "all projects"; }
+    if lowered in project.name.lower() { return "name"; }
+    if lowered in project.tagline.lower() { return "tagline"; }
+    if lowered in project.prompt.lower() { return "brief"; }
+    return "";
+}
+
+sv def:pub search_projects(query: str = "", include_archived: bool = False) -> list[dict[str, str]] {
+    lowered = query.strip().lower();
+    rows: list[dict[str, str]] = [];
+    for project in [root-->][?:Project] {
+        match_kind: str = search_match(project, lowered);
+        visible = include_archived or project.status != "archived";
+        if visible and match_kind {
+            versions = [project ->:ProjectVersion:->];
+            validations = [project ->:ProjectValidation:->];
+            score = validations[-1].score if validations else 0;
+            rows.append({
+                "project_id": jid(project),
+                "name": project.name,
+                "tagline": project.tagline,
+                "status": project.status,
+                "match": match_kind,
+                "version_count": str(len(versions)),
+                "readiness_score": str(score),
+                "updated_at": project.updated_at
+            });
+        }
+    }
+    return rows;
+}
+
+sv def artifact_manifest_object(project_id: str, version: DesignVersion, artifact_type: str, filename: str, file_format: str, status: str, source: str) -> ArtifactManifestRow {
+    return ArtifactManifestRow(
+        project_id=project_id,
+        version_id=jid(version),
+        version_label=version.label,
+        artifact_type=artifact_type,
+        filename=filename,
+        format=file_format,
+        status=status,
+        source=source,
+        byte_length=len(source)
+    );
+}
+
+sv def artifact_manifest_dict(row: ArtifactManifestRow) -> dict[str, str] {
+    return {
+        "project_id": row.project_id,
+        "version_id": row.version_id,
+        "version_label": row.version_label,
+        "artifact_type": row.artifact_type,
+        "filename": row.filename,
+        "format": row.format,
+        "status": row.status,
+        "source": row.source,
+        "byte_length": str(row.byte_length)
+    };
+}
+
+sv def project_artifact_manifest_rows(project: Project) -> list[ArtifactManifestRow] {
+    rows: list[ArtifactManifestRow] = [];
+    for version in [project ->:ProjectVersion:->] {
+        cads = [version ->:VersionCad:->];
+        pcbs = [version ->:VersionPcb:->];
+        schematics = [version ->:VersionSchematic:->];
+        firmwares = [version ->:VersionFirmware:->];
+        boms = [version ->:VersionBom:->];
+        if cads {
+            rows.append(artifact_manifest_object(jid(project), version, "CAD", cads[0].name, cads[0].format, cads[0].export_status, cads[0].source));
+        }
+        if pcbs {
+            rows.append(artifact_manifest_object(jid(project), version, "PCB", pcbs[0].name, "circuitron-plan", pcbs[0].drc_status, pcbs[0].plan));
+        }
+        if schematics {
+            rows.append(artifact_manifest_object(jid(project), version, "SCHEMATIC", schematics[0].name, "netlist", schematics[0].erc_status, schematics[0].netlist));
+        }
+        if firmwares {
+            rows.append(artifact_manifest_object(jid(project), version, "FIRMWARE", firmwares[0].name, firmwares[0].language, firmwares[0].build_status, firmwares[0].source));
+        }
+        if boms {
+            rows.append(artifact_manifest_object(jid(project), version, "BOM", boms[0].name, "csv/json", "source-ready", bom_csv(boms[0].bom_doc)));
+        }
+    }
+    return rows;
+}
+
+sv def:pub get_artifact_manifest(project_id: str) -> list[dict[str, str]] {
+    project = project_by_id(project_id);
+    if project is None { return []; }
+    rows: list[dict[str, str]] = [];
+    for item in project_artifact_manifest_rows(project) {
+        rows.append(artifact_manifest_dict(item));
+    }
+    return rows;
+}
+
+sv def:pub bom_availability_summary(project_id: str) -> dict[str, str] {
+    project = project_by_id(project_id);
+    if project is None { return {"ok": "false", "error": "project not found"}; }
+    workspace = snapshot_project(project);
+    total = len(workspace.bom_document.lines);
+    known = 0;
+    missing_supplier = 0;
+    needs_review = 0;
+    estimated_cents = 0;
+    for line in workspace.bom_document.lines {
+        estimated_cents = estimated_cents + int(line.unit_price * 100.0) * line.qty;
+        if line.supplier and line.mpn { known = known + 1; }
+        if not line.supplier { missing_supplier = missing_supplier + 1; }
+        if "check" in line.availability.lower() or "unknown" in line.availability.lower() { needs_review = needs_review + 1; }
+    }
+    return {
+        "ok": "true",
+        "project_id": project_id,
+        "line_count": str(total),
+        "sourced_lines": str(known),
+        "missing_supplier": str(missing_supplier),
+        "needs_availability_review": str(needs_review),
+        "estimated_component_cents": str(estimated_cents),
+        "currency": "usd",
+        "status": ("ready" if total > 0 and needs_review == 0 else "needs-review")
+    };
+}
+
+sv def:pub cad_dimension_summary(project_id: str) -> dict[str, str] {
+    project = project_by_id(project_id);
+    if project is None { return {"ok": "false", "error": "project not found"}; }
+    workspace = snapshot_project(project);
+    shell = document_to_shell(workspace.cad_document);
+    return {
+        "ok": "true",
+        "project_id": project_id,
+        "active_version": workspace.active_version,
+        "width_mm": f"{shell.length_mm:.1f}",
+        "depth_mm": f"{shell.width_mm:.1f}",
+        "height_mm": f"{shell.height_mm:.1f}",
+        "wall_mm": f"{shell.wall_mm:.1f}",
+        "corner_radius_mm": f"{shell.corner_radius_mm:.1f}",
+        "feature_count": str(len(workspace.cad_document.features)),
+        "parameter_count": str(len(workspace.cad_document.openscad.parameters)),
+        "source_format": "openscad",
+        "export_status": "source-ready; STL and STEP require a CAD worker"
+    };
+}
+
+sv def:pub pcb_dependency_summary(project_id: str) -> dict[str, str] {
+    project = project_by_id(project_id);
+    if project is None { return {"ok": "false", "error": "project not found"}; }
+    workspace = snapshot_project(project);
+    validation = workspace.circuitron.design_validation;
+    real_result = workspace.circuitron.success and workspace.circuitron.pcb_source != "mock";
+    return {
+        "ok": "true",
+        "project_id": project_id,
+        "source": workspace.circuitron.pcb_source,
+        "worker_available": str(real_result),
+        "drc_status": ("verified" if real_result and validation.errors == 0 else "not-run"),
+        "erc_status": ("verified" if real_result and validation.errors == 0 else "not-run"),
+        "passed": str(validation.passed),
+        "warnings": str(validation.warnings),
+        "errors": str(validation.errors),
+        "width_mm": f"{workspace.pcb_ops.width_mm:.1f}",
+        "height_mm": f"{workspace.pcb_ops.height_mm:.1f}",
+        "layers": str(workspace.pcb_ops.layer_count),
+        "message": (validation.summary if real_result else "Circuitron/KiCad worker is not configured; no DRC/ERC claim is made.")
+    };
+}
+
+sv def:pub firmware_dependency_summary(project_id: str) -> dict[str, str] {
+    project = project_by_id(project_id);
+    if project is None { return {"ok": "false", "error": "project not found"}; }
+    workspace = snapshot_project(project);
+    return {
+        "ok": "true",
+        "project_id": project_id,
+        "language": "circuitpython",
+        "source_bytes": str(len(workspace.firmware)),
+        "build_status": "not-run",
+        "flash_status": "not-run",
+        "worker_available": "false",
+        "message": "CircuitPython starter source is available, but no hardware build or flash runner is configured."
+    };
+}
+
+sv def:pub ar_capability_summary(project_id: str) -> dict[str, str] {
+    project = project_by_id(project_id);
+    if project is None { return {"ok": "false", "error": "project not found"}; }
+    handoffs = [project ->:ProjectAr:->];
+    workspace = snapshot_project(project);
+    return {
+        "ok": "true",
+        "project_id": project_id,
+        "handoff_recorded": str(bool(handoffs)),
+        "preferred_mode": workspace.ar_payload.preferred_mode,
+        "model_formats": "glb/usdz/open-scad-source",
+        "webxr": "browser-detected",
+        "quicklook": "requires-valid-usdz",
+        "scene_viewer": "requires-valid-glb",
+        "camera_preview": "browser-permission",
+        "plane_detection": "not-claimed",
+        "message": "AR is progressive enhancement; the fallback is an interactive camera or 3D preview, not guaranteed plane tracking."
+    };
+}
+
+sv def project_dependency_objects(project: Project) -> list[DependencyDisclosure] {
+    workspace = snapshot_project(project);
+    pcb_ready = workspace.circuitron.success and workspace.circuitron.pcb_source != "mock";
+    has_ar = bool([project ->:ProjectAr:->]);
+    return [
+        DependencyDisclosure(key="cad-worker", feature="STL / STEP export", available=False, required=False, owner="CAD worker", message="OpenSCAD source is available; mesh and STEP conversion needs a configured CAD worker."),
+        DependencyDisclosure(key="pcb-worker", feature="PCB DRC / ERC", available=pcb_ready, required=True, owner="Circuitron / KiCad", message=("A real Circuitron result is attached." if pcb_ready else "No Circuitron or KiCad validation result is attached.")),
+        DependencyDisclosure(key="firmware-worker", feature="Firmware build / flash", available=False, required=True, owner="CircuitPython toolchain", message="Generated CircuitPython is untested until a board-specific runner is configured."),
+        DependencyDisclosure(key="stripe", feature="Fabrication checkout", available=False, required=False, owner="Stripe", message="Server quotes are available; payment requires verified Stripe configuration and webhook delivery."),
+        DependencyDisclosure(key="ar-models", feature="Native AR handoff", available=has_ar, required=False, owner="AR exporter", message=("A project AR handoff is recorded." if has_ar else "Create a handoff after browser capability detection; native GLB/USDZ exports are not assumed."))
+    ];
+}
+
+sv def:pub project_dependency_disclosures(project_id: str) -> list[dict[str, str]] {
+    project = project_by_id(project_id);
+    if project is None { return []; }
+    rows: list[dict[str, str]] = [];
+    for item in project_dependency_objects(project) {
+        rows.append({
+            "key": item.key,
+            "feature": item.feature,
+            "available": str(item.available),
+            "required": str(item.required),
+            "owner": item.owner,
+            "message": item.message
+        });
+    }
+    return rows;
+}
+
+sv def project_order_history_objects(project: Project) -> list[OrderHistoryRow] {
+    rows: list[OrderHistoryRow] = [];
+    for quote in [project ->:ProjectQuote:->] {
+        orders = [quote ->:QuoteOrder:->];
+        for order in orders {
+            rows.append(OrderHistoryRow(
+                order_id=jid(order),
+                quote_id=jid(quote),
+                status=str(order.status).split(".")[-1],
+                quantity=quote.quantity,
+                amount_cents=quote.amount_cents,
+                currency=quote.currency,
+                provider=order.provider,
+                created_at="local",
+                detail=order.details
+            ));
+        }
+    }
+    return rows;
+}
+
+sv def:pub get_project_order_history(project_id: str) -> list[dict[str, str]] {
+    project = project_by_id(project_id);
+    if project is None { return []; }
+    rows: list[dict[str, str]] = [];
+    for item in project_order_history_objects(project) {
+        rows.append({
+            "order_id": item.order_id,
+            "quote_id": item.quote_id,
+            "status": item.status,
+            "quantity": str(item.quantity),
+            "amount_cents": str(item.amount_cents),
+            "currency": item.currency,
+            "provider": item.provider,
+            "created_at": item.created_at,
+            "detail": item.detail
+        });
+    }
+    return rows;
+}
+
+sv def:pub project_collaboration_snapshot(project_id: str) -> dict[str, str] {
+    project = project_by_id(project_id);
+    if project is None { return {"ok": "false", "error": "project not found"}; }
+    users = [project <-:Owns:<-];
+    teams = [project <-:TeamProject:<-];
+    activities = [project ->:ProjectActivityLog:->];
+    last_activity = activities[-1].summary if activities else "No activity recorded yet.";
+    team_name = teams[0].name if teams else "Local Hardware Lab";
+    return {
+        "ok": "true",
+        "project_id": project_id,
+        "shared": str(project.shared),
+        "access_mode": ("read-only link" if project.shared else "private workspace"),
+        "team_name": team_name,
+        "member_count": str(len(users) if users else 1),
+        "activity_count": str(len(activities)),
+        "last_activity": last_activity,
+        "auth_mode": "demo/local" if users else "unresolved"
+    };
+}
+
+sv def project_health_object(project: Project) -> ProjectHealthReport {
+    workspace = snapshot_project(project);
+    evidence = project_readiness_evidence(project);
+    blockers: list[str] = [];
+    checks: list[dict[str, str]] = [];
+    for item in evidence {
+        checks.append({"key": item.key, "label": item.label, "state": item.state, "message": item.message, "source": item.source});
+        if item.state != "verified" { blockers.append(item.message); }
+    }
+    for dependency in project_dependency_objects(project) {
+        if dependency.required and not dependency.available { blockers.append(dependency.message); }
+    }
+    artifact_count = len(project_artifact_manifest_rows(project));
+    status = "ready" if not blockers else "needs-attention";
+    return ProjectHealthReport(
+        project_id=jid(project),
+        project_name=project.name,
+        status=status,
+        score=workspace.readiness_score,
+        active_version=workspace.active_version,
+        artifact_count=artifact_count,
+        blockers=blockers,
+        checks=checks
+    );
+}
+
+sv def:pub get_project_health(project_id: str) -> dict[str, str] {
+    project = project_by_id(project_id);
+    if project is None { return {"ok": "false", "error": "project not found"}; }
+    health_result = project_health_object(project);
+    return {
+        "ok": "true",
+        "project_id": health_result.project_id,
+        "project_name": health_result.project_name,
+        "status": health_result.status,
+        "score": str(health_result.score),
+        "active_version": health_result.active_version,
+        "artifact_count": str(health_result.artifact_count),
+        "blocker_count": str(len(health_result.blockers)),
+        "blockers": " | ".join(health_result.blockers)
+    };
+}
+
+sv def project_command_objects(project: Project) -> list[ProjectCommand] {
+    workspace = snapshot_project(project);
+    quote_exists = bool([project ->:ProjectQuote:->]);
+    active_version = bool(active_version_for(project));
+    return [
+        ProjectCommand(key="generate", label="Generate revision", category="design", enabled=project.status == "active", reason=("Project is archived." if project.status != "active" else "Creates a new typed artifact version.")),
+        ProjectCommand(key="restore", label="Restore version", category="versioning", enabled=active_version, reason=("No version graph exists." if not active_version else "An active version can be selected.")),
+        ProjectCommand(key="validate", label="Run readiness audit", category="validation", enabled=active_version, reason=("Create a design version first." if not active_version else "Records evidence-backed readiness results.")),
+        ProjectCommand(key="export", label="Build source bundle", category="export", enabled=active_version, reason=("No source artifacts exist." if not active_version else "Exports source files with dependency warnings.")),
+        ProjectCommand(key="quote", label="Create prototype quote", category="manufacturing", enabled=active_version, reason=("A CAD and PCB graph is required." if not active_version else "Pricing is calculated server-side.")),
+        ProjectCommand(key="checkout", label="Open checkout", category="manufacturing", enabled=False, reason=("Stripe checkout is not configured." if not quote_exists else "Verified payment configuration is required.")),
+        ProjectCommand(key="share", label="Share read-only view", category="collaboration", enabled=project.status == "active", reason=("Archived projects cannot be shared." if project.status != "active" else "Creates project share metadata.")),
+        ProjectCommand(key="ar", label="Create AR handoff", category="preview", enabled=active_version, reason=("A CAD version is required." if not active_version else workspace.ar_payload.preferred_mode))
+    ];
+}
+
+sv def:pub get_project_commands(project_id: str) -> list[dict[str, str]] {
+    project = project_by_id(project_id);
+    if project is None { return []; }
+    rows: list[dict[str, str]] = [];
+    for command in project_command_objects(project) {
+        rows.append({
+            "key": command.key,
+            "label": command.label,
+            "category": command.category,
+            "enabled": str(command.enabled),
+            "reason": command.reason
+        });
+    }
+    return rows;
+}
+
+sv def:pub get_project_export_records(project_id: str) -> list[dict[str, str]] {
+    project = project_by_id(project_id);
+    if project is None { return []; }
+    rows: list[dict[str, str]] = [];
+    for export in [project ->:ProjectExport:->] {
+        rows.append({
+            "id": jid(export),
+            "format": export.format,
+            "filename": export.filename,
+            "version": export.version_label,
+            "byte_length": str(export.byte_length),
+            "created_at": export.created_at
+        });
+    }
+    return rows;
+}
+
+sv def:pub validate_project_input(name: str, prompt: str) -> dict[str, str] {
+    clean_name = normalized_project_name(name);
+    clean_prompt = normalized_project_prompt(prompt);
+    return {
+        "ok": ("false" if not name.strip() or not prompt.strip() else "true"),
+        "name": clean_name,
+        "prompt": clean_prompt,
+        "name_changed": str(clean_name != name),
+        "prompt_changed": str(clean_prompt != prompt),
+        "name_limit": "96",
+        "prompt_limit": "12000",
+        "message": ("A name and product brief are required." if not name.strip() or not prompt.strip() else "Project input is valid and normalized.")
+    };
+}
+
+sv def:pub validate_quote_quantity(quantity: int) -> dict[str, str] {
+    valid = quantity > 0 and quantity <= 10000;
+    normalized = quantity if quantity > 0 else 1;
+    if normalized > 10000 { normalized = 10000; }
+    return {
+        "ok": str(valid),
+        "requested": str(quantity),
+        "normalized": str(normalized),
+        "minimum": "1",
+        "maximum": "10000",
+        "message": ("Quantity is within the server quote limits." if valid else "Quantity must be between 1 and 10000.")
+    };
+}
+
+sv def:pub project_readiness_score(project_id: str) -> dict[str, str] {
+    project = project_by_id(project_id);
+    if project is None { return {"ok": "false", "error": "project not found"}; }
+    workspace = snapshot_project(project);
+    evidence = project_readiness_evidence(project);
+    verified = 0;
+    warnings = 0;
+    blocked = 0;
+    for item in evidence {
+        if item.state == "verified" { verified = verified + 1; }
+        if item.state == "warning" or item.state == "not_run" { warnings = warnings + 1; }
+        if item.state == "blocked" { blocked = blocked + 1; }
+    }
+    return {
+        "ok": "true",
+        "project_id": project_id,
+        "score": str(workspace.readiness_score),
+        "checks": str(len(evidence)),
+        "verified": str(verified),
+        "warnings": str(warnings),
+        "blocked": str(blocked),
+        "label": ("manufacturing-ready" if workspace.readiness_score >= 90 else "needs-review")
+    };
+}
+
+sv def:pub readiness_blockers(project_id: str) -> list[dict[str, str]] {
+    project = project_by_id(project_id);
+    if project is None { return []; }
+    rows: list[dict[str, str]] = [];
+    for item in project_readiness_evidence(project) {
+        if item.state != "verified" {
+            rows.append({"key": item.key, "label": item.label, "state": item.state, "source": item.source, "message": item.message, "score_impact": str(item.score_impact)});
+        }
+    }
+    return rows;
+}
+
+sv def:pub project_overview(project_id: str) -> dict[str, str] {
+    project = project_by_id(project_id);
+    if project is None { return {"ok": "false", "error": "project not found"}; }
+    versions = [project ->:ProjectVersion:->];
+    activities = [project ->:ProjectActivityLog:->];
+    health = project_health_object(project);
+    deps = project_dependency_objects(project);
+    unavailable = 0;
+    for dependency in deps {
+        if dependency.required and not dependency.available { unavailable = unavailable + 1; }
+    }
+    return {
+        "ok": "true",
+        "project_id": project_id,
+        "name": project.name,
+        "status": project.status,
+        "shared": str(project.shared),
+        "active_version": health.active_version,
+        "version_count": str(len(versions)),
+        "artifact_count": str(health.artifact_count),
+        "activity_count": str(len(activities)),
+        "readiness_score": str(health.score),
+        "health_status": health.status,
+        "dependency_blockers": str(unavailable),
+        "last_updated": project.updated_at
+    };
+}
+
+sv def:pub create_save_checkpoint(project_id: str, label: str = "manual checkpoint") -> dict[str, str] {
+    project = project_by_id(project_id);
+    if project is None { return {"ok": "false", "error": "project not found"}; }
+    clean_label = label.strip() if label.strip() else "manual checkpoint";
+    record_project_activity(project, "save", "checkpoint", f"Saved {clean_label} for {project.name}.");
+    project.updated_at = "local";
+    versions = [project ->:ProjectVersion:->];
+    return {"ok": "true", "project_id": project_id, "label": clean_label, "active_version": (versions[-1].label if versions else "none"), "activity_count": str(len([project ->:ProjectActivityLog:->]))};
+}
+
+sv def:pub project_version_timeline(project_id: str) -> list[dict[str, str]] {
+    project = project_by_id(project_id);
+    if project is None { return []; }
+    rows: list[dict[str, str]] = [];
+    index = 0;
+    for version in [project ->:ProjectVersion:->] {
+        index = index + 1;
+        row = project_version_row(project, version);
+        row["sequence"] = str(index);
+        row["state"] = ("active" if project.active_version_id == jid(version) else "available");
+        rows.append(row);
+    }
+    return rows;
+}
+
+sv def:pub project_artifact_counts(project_id: str) -> dict[str, str] {
+    project = project_by_id(project_id);
+    if project is None { return {"ok": "false", "error": "project not found"}; }
+    counts = {"CAD": "0", "PCB": "0", "SCHEMATIC": "0", "FIRMWARE": "0", "BOM": "0"};
+    for item in project_artifact_manifest_rows(project) {
+        counts[item.artifact_type] = str(int(counts[item.artifact_type]) + 1);
+    }
+    counts["ok"] = "true";
+    counts["project_id"] = project_id;
+    counts["total"] = str(len(project_artifact_manifest_rows(project)));
+    return counts;
+}
+
+sv def:pub transition_order(project_id: str, order_id: str, target_status: str) -> dict[str, str] {
+    project = project_by_id(project_id);
+    if project is None { return {"ok": "false", "error": "project not found"}; }
+    target = target_status.strip().upper();
+    if target == "PAID" { return {"ok": "false", "error": "paid status requires a verified Stripe webhook"}; }
+    for quote in [project ->:ProjectQuote:->] {
+        for order in [quote ->:QuoteOrder:->] {
+            if jid(order) == order_id {
+                current = str(order.status).split(".")[-1];
+                if target == "CANCELED" and current == "CHECKOUT_REQUIRED" {
+                    order.status = OrderStatus.CANCELED;
+                    order.details = "Canceled before payment; no fabrication order was created.";
+                    record_project_activity(project, "cancel", "order", f"Canceled order {order_id} before payment.");
+                    return {"ok": "true", "order_id": order_id, "status": "CANCELED", "message": order.details};
+                }
+                if target == "FAILED" and current == "CHECKOUT_REQUIRED" {
+                    order.status = OrderStatus.FAILED;
+                    order.details = "Checkout failed or was unavailable; no fabrication order was created.";
+                    record_project_activity(project, "fail", "order", f"Recorded failed checkout for {order_id}.", "error");
+                    return {"ok": "true", "order_id": order_id, "status": "FAILED", "message": order.details};
+                }
+                return {"ok": "false", "order_id": order_id, "status": current, "error": f"transition from {current} to {target} is not allowed"};
+            }
+        }
+    }
+    return {"ok": "false", "error": "order not found"};
+}
+
 sv walker:pub CreateProject {
     has name: str,
         prompt: str;
@@ -1395,6 +2051,126 @@ sv walker:pub BuildProjectBundle {
 sv walker:pub ProjectGraphStats {
     has project_id: str;
     can run with Root entry { report project_graph_stats(self.project_id); }
+}
+
+sv walker:pub ProjectVersions {
+    has project_id: str;
+    can run with Root entry { report project_version_rows(self.project_id); }
+}
+
+sv walker:pub SearchProjects {
+    has query: str = "",
+        include_archived: bool = False;
+    can run with Root entry { report search_projects(self.query, self.include_archived); }
+}
+
+sv walker:pub ArtifactManifest {
+    has project_id: str;
+    can run with Root entry { report get_artifact_manifest(self.project_id); }
+}
+
+sv walker:pub BOMAvailability {
+    has project_id: str;
+    can run with Root entry { report bom_availability_summary(self.project_id); }
+}
+
+sv walker:pub CADDimensions {
+    has project_id: str;
+    can run with Root entry { report cad_dimension_summary(self.project_id); }
+}
+
+sv walker:pub PCBDependencies {
+    has project_id: str;
+    can run with Root entry { report pcb_dependency_summary(self.project_id); }
+}
+
+sv walker:pub FirmwareDependencies {
+    has project_id: str;
+    can run with Root entry { report firmware_dependency_summary(self.project_id); }
+}
+
+sv walker:pub ARCapabilities {
+    has project_id: str;
+    can run with Root entry { report ar_capability_summary(self.project_id); }
+}
+
+sv walker:pub ProjectDependencies {
+    has project_id: str;
+    can run with Root entry { report project_dependency_disclosures(self.project_id); }
+}
+
+sv walker:pub ProjectCollaboration {
+    has project_id: str;
+    can run with Root entry { report project_collaboration_snapshot(self.project_id); }
+}
+
+sv walker:pub ProjectOrderHistory {
+    has project_id: str;
+    can run with Root entry { report get_project_order_history(self.project_id); }
+}
+
+sv walker:pub ProjectHealth {
+    has project_id: str;
+    can run with Root entry { report get_project_health(self.project_id); }
+}
+
+sv walker:pub ProjectCommands {
+    has project_id: str;
+    can run with Root entry { report get_project_commands(self.project_id); }
+}
+
+sv walker:pub ProjectExports {
+    has project_id: str;
+    can run with Root entry { report get_project_export_records(self.project_id); }
+}
+
+sv walker:pub ProjectOverview {
+    has project_id: str;
+    can run with Root entry { report project_overview(self.project_id); }
+}
+
+sv walker:pub ProjectReadinessScore {
+    has project_id: str;
+    can run with Root entry { report project_readiness_score(self.project_id); }
+}
+
+sv walker:pub ProjectReadinessBlockers {
+    has project_id: str;
+    can run with Root entry { report readiness_blockers(self.project_id); }
+}
+
+sv walker:pub ProjectVersionTimeline {
+    has project_id: str;
+    can run with Root entry { report project_version_timeline(self.project_id); }
+}
+
+sv walker:pub ProjectArtifactCounts {
+    has project_id: str;
+    can run with Root entry { report project_artifact_counts(self.project_id); }
+}
+
+sv walker:pub SaveCheckpoint {
+    has project_id: str,
+        label: str = "manual checkpoint";
+    can run with Root entry { report create_save_checkpoint(self.project_id, self.label); }
+}
+
+sv walker:pub ValidateProjectInput {
+    has name: str,
+        prompt: str;
+    can run with Root entry { report validate_project_input(self.name, self.prompt); }
+}
+
+sv walker:pub ValidateQuoteQuantity {
+    has quantity: int;
+    can run with Root entry { report validate_quote_quantity(self.quantity); }
+}
+
+sv walker:pub TransitionOrder {
+    has project_id: str,
+        order_id: str,
+        target_status: str;
+    can run with Root entry { report transition_order(self.project_id, self.order_id, self.target_status); }
 }
 
 sv walker:pub Health {
