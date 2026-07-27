@@ -26,9 +26,11 @@ persistence, AI/fallback generation, artifact versions, restore, CAD data, PCB
 planning state, firmware source, BOM normalization, validation evidence, AR
 handoff records, quote calculation, activity history, and source bundles.
 
-Next.js owns browser behavior: Three.js rendering, camera/orbit interaction,
-responsive panel state, command search, microphone transcription when supported,
-local file selection, approximate token counting, downloads, and camera preview.
+The canonical Jac client owns browser behavior through the supported TSX/npm
+interop module imported by `main.jac`: Three.js rendering, camera/orbit
+interaction, responsive panel state, command search, microphone transcription
+when supported, local file selection, approximate token counting, downloads,
+and camera preview. There is no parallel Next.js implementation.
 
 Sol Core cognitive load, token rate, and specialist activity are explicitly
 labeled as a local interface simulation because the current JaC endpoint does

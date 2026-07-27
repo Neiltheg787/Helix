@@ -189,7 +189,7 @@ declare global {
   }
 }
 
-const API_URL = process.env.NEXT_PUBLIC_HELIX_API_URL ?? "";
+const API_URL = "";
 const DEFAULT_DIMENSIONS: Dimensions = { width: 80, depth: 52, height: 24, wall: 2 };
 const DEFAULT_LAYERS: LayerVisibility = { shell: true, lid: true, pcb: true, hardware: true };
 
@@ -297,7 +297,7 @@ function createArHandoff(projectId: string, support: ArSupport, fallback: string
       android_scene_viewer: support.sceneViewer,
       camera: support.camera,
       fallback,
-      message: "Browser compatibility was detected by the Helix Next.js spatial preview."
+      message: "Browser compatibility was detected by the canonical Helix Jac spatial client."
     }
   });
 }
@@ -1196,7 +1196,7 @@ function SolCore({
   );
 }
 
-export default function Page() {
+export function HelixApp() {
   const [tool, setTool] = useState<ToolId>("design");
   const [dockTab, setDockTab] = useState<DockTab>("core");
   const [dockOpen, setDockOpen] = useState(false);

@@ -2,18 +2,18 @@
 
 ## Supported Topology
 
-Helix runs as a native Jac API service plus a Next.js frontend UI.
+Helix runs as one native Jac service. JacHammer serves the API and the canonical client bundle generated from `main.jac`.
 
-1. Build and run the Jac backend on a container platform such as Render, Fly.io, Railway, ECS, or Kubernetes.
-2. Build the Next.js UI with `npm run build`.
-3. Deploy the frontend to Vercel or another Next-compatible host and set `HELIX_JAC_ORIGIN` or `NEXT_PUBLIC_HELIX_API_URL` to the public JaC backend URL.
+1. Install the pinned Jac 0.34.7 toolchain and run `jac install`.
+2. Run `jac check .`, `jac test helix_domain_tests.jac`, and `jac build`.
+3. Run the sealed `dist/helix.jab` with JacHammer or start `jac start` on a container platform such as Render, Fly.io, Railway, ECS, or Kubernetes.
 4. Terminate HTTPS at the platform or reverse proxy.
 5. Configure optional worker URLs through environment variables.
 
-The repository root intentionally contains `package.json`, `app/`, and `next.config.mjs` only for the frontend. It does not contain Next API routes, and production backend behavior is not a Node/Next build. The supported backend entrypoint is:
+The repository root has no Next.js app or competing Vercel entrypoint. The supported full-stack entrypoint is:
 
 ```bash
-jac start --no-client --host 0.0.0.0 --port ${PORT:-8000}
+jac start --host 0.0.0.0 --port ${PORT:-8000}
 ```
 
 ## Commands
@@ -23,9 +23,8 @@ jac --version
 jac install
 jac check .
 jac build
-npm ci
-npm run build
-jac start --no-client --host 0.0.0.0 --port 8000
+jac test helix_domain_tests.jac
+jac start --host 0.0.0.0 --port 8000
 ```
 
 ## Render
@@ -63,4 +62,4 @@ Expected report:
 
 ## CORS
 
-For managed deployment, configure `HELIX_JAC_ORIGIN` for Next rewrites or configure the Jac reverse proxy/CORS layer to allow the production frontend origin to call `/walker/*` and `/function/*` endpoints over HTTPS.
+For managed deployment, configure `HELIX_PUBLIC_ORIGIN` on the Jac service or reverse proxy when CORS is needed. Same-origin deployment is the default and requires no browser API URL variable.
