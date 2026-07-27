@@ -3,12 +3,12 @@ import React from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Helix",
-  description: "AI-native hardware engineering workspace powered by a JaC backend."
+  title: "Helix | Spatial Engineering",
+  description: "Autonomous spatial hardware engineering, powered by a native JaC backend."
 };
 
 export const viewport: Viewport = {
-  themeColor: "#f8faf8",
+  themeColor: "#050507",
   width: "device-width",
   initialScale: 1
 };

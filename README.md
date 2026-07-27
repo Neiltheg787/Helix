@@ -1,16 +1,17 @@
 # Helix
 
-Helix is a JaC-backed hardware engineering app with a production Next.js/TypeScript UI. JaC owns the backend API, graph persistence model, AI orchestration, project/version/artifact topology, CAD/PCB/BOM/AR/order data structures, and walkers. Next.js owns the polished browser UI only.
+Helix is a JaC-backed hardware engineering app with a production Next.js/TypeScript spatial UI. JaC owns the backend API, graph persistence model, AI orchestration, project/version/artifact topology, lifecycle, CAD/PCB/BOM/AR/order data structures, evidence, bundle exports, and walkers. Next.js owns browser interaction and visualization only.
 
 ## Architecture
 
 - `main.jac`: Jac nodes, typed edges, walkers, `def:pub` APIs, AI structured-output functions, and backend domain structures.
-- `app/page.tsx`: production Next.js workspace UI that calls the JaC `/function/*` and `/walker/*` endpoints.
-- `app/globals.css`: frontend design system, responsive layout, and restrained motion.
+- `app/page.tsx`: single production Next.js spatial workspace with a lazy Three.js viewport, prompt terminal, version tree, artifact views, AR camera fallback, and JaC API client.
+- `app/globals.css`: cyber-spatial design system, responsive application shell, accessible states, and reduced-motion fallbacks.
+- `docs/spatial-interface.md`: UI hierarchy, ownership model, and user flow.
 - `next.config.mjs`: frontend rewrites to the JaC API service; no Next API routes are used.
 - `package.json`: UI development/build tooling.
 - `styles.css`: legacy JaC client styling kept for the built-in JaC app shell.
-- `test_helix_domain.jac`: Jac tests for graph domain behavior.
+- `helix_domain_tests.jac`: standalone Jac tests for fallback artifacts, quote math, normalization, and validation evidence.
 - `jac.toml`: Jac project, npm interop, byLLM, client, and serve config.
 - `Dockerfile`: production Jac service container.
 
@@ -47,7 +48,7 @@ jac build
 npm run build
 ```
 
-`jac test main.jac` currently hits a JaC 0.34.7 client-test harness issue resolving `styles.css` from a temporary directory. Domain tests are embedded in `main.jac`; `jac build` still runs the whole-program check and client bundle gate.
+`jac test helix_domain_tests.jac` runs the standalone domain suite. The same assertions also remain alongside the native JaC web entry in `main.jac`; `jac build` runs the whole-program check and client bundle gate.
 
 ## Production
 
@@ -77,4 +78,4 @@ Current local build exposes the AR workflow and records handoffs. Real plane tra
 - `Dockerfile`: production container definition.
 - GitHub workflow YAML: CI configuration.
 
-Current target split is roughly 60% JaC backend/domain and 40% Next.js/TypeScript UI.
+The executable-source split is now about 52% JaC and 48% Next.js/TypeScript by physical lines and bytes. CSS is reported separately because it is presentation, not application logic.

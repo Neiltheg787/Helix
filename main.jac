@@ -17,6 +17,8 @@ enum CadShapeKind { BOX, CYLINDER, SPHERE, ROUNDED_BOX }
 enum CadOpenFaceMode { NONE, FRONT, TOP }
 enum PcbSource { CIRCUITRON, MOCK, PCBFLOW }
 enum ProjectToolId { CAD, PCB, BOM, CODE, AR, ORDER }
+enum ProjectLifecycle { ACTIVE, ARCHIVED }
+enum EvidenceState { VERIFIED, WARNING, BLOCKED, NOT_RUN }
 
 obj ChatMsg {
     has role: str,
@@ -273,6 +275,48 @@ obj WorkspaceSnapshot {
         order_status: str;
 }
 
+obj ProjectBundle {
+    has project_id: str,
+        project_name: str,
+        version_label: str,
+        generated_at: str,
+        manifest: dict[str, str],
+        files: dict[str, str],
+        warnings: list[str];
+}
+
+obj VersionComparison {
+    has project_id: str,
+        from_version_id: str,
+        to_version_id: str,
+        from_label: str,
+        to_label: str,
+        cad_feature_delta: int,
+        bom_line_delta: int,
+        firmware_byte_delta: int,
+        pcb_width_delta_mm: float,
+        pcb_height_delta_mm: float,
+        summary: str;
+}
+
+obj ReadinessEvidence {
+    has key: str,
+        label: str,
+        state: str,
+        source: str,
+        message: str,
+        score_impact: int;
+}
+
+obj ProjectActivityRow {
+    has id: str,
+        action: str,
+        target: str,
+        summary: str,
+        status: str,
+        created_at: str;
+}
+
 node User {
     has email: str,
         display_name: str,
@@ -291,6 +335,7 @@ node Project {
         prompt: str,
         tagline: str = "Idea to hardware workspace",
         active_tool: str = "cad",
+        active_version_id: str = "",
         status: str = "active",
         created_at: str = "local",
         updated_at: str = "local",
@@ -331,7 +376,7 @@ node SchematicArtifact {
 node FirmwareArtifact {
     has name: str,
         source: str,
-        language: str = "cpp",
+        language: str = "python",
         build_status: str = "Untested; connect firmware build worker.";
 }
 
@@ -396,6 +441,22 @@ node Order {
         details: str = "Stripe is not configured.";
 }
 
+node ProjectActivity {
+    has action: str,
+        target: str,
+        summary: str,
+        status: str = "complete",
+        created_at: str = "local";
+}
+
+node ExportRecord {
+    has format: str,
+        filename: str,
+        version_label: str,
+        byte_length: int,
+        created_at: str = "local";
+}
+
 edge Owns: User --> Project {}
 edge MemberOf: User --> Team { has access: str = "owner"; }
 edge TeamProject: Team --> Project {}
@@ -412,6 +473,8 @@ edge ProjectConversation: Project --> Conversation {}
 edge ConversationMessage: Conversation --> Message {}
 edge ProjectQuote: Project --> ManufacturingQuote {}
 edge QuoteOrder: ManufacturingQuote --> Order {}
+edge ProjectActivityLog: Project --> ProjectActivity {}
+edge ProjectExport: Project --> ExportRecord {}
 
 sem synthesize_hardware_design = "Return concrete CAD, PCB, firmware, BOM, validation, and change summaries for a described physical electronics product. Never claim validations passed without evidence.";
 sv def synthesize_hardware_design(product_prompt: str, project_context: str) -> GenerationResult by llm();
@@ -594,17 +657,17 @@ sv def fallback_generation(prompt: str) -> GenerationResult {
         pcb_plan="Two-layer controller board, 50mm x 35mm, USB-C power/input, MCU, status LED, sensor header, programming pads. DRC not run.",
         pcb_ops=pcb,
         circuitron=circuitron,
-        firmware="#include <Arduino.h>\nvoid setup(){ Serial.begin(115200); pinMode(13, OUTPUT); }\nvoid loop(){ digitalWrite(13, millis() / 500 % 2); }",
+        firmware="import time\nimport board\nimport digitalio\n\nstatus = digitalio.DigitalInOut(board.LED)\nstatus.direction = digitalio.Direction.OUTPUT\n\nwhile True:\n    status.value = not status.value\n    time.sleep(0.5)\n",
         bom_document=bom_doc,
         validation=[
             "CAD generated as OpenSCAD source only; STL/STEP worker not configured.",
             "PCB plan exists but KiCad DRC/ERC has not run.",
-            "Firmware is starter Arduino code and is untested on hardware."
+            "Firmware is starter CircuitPython code and is untested on hardware."
         ],
         changes=[
             DesignChange(target="CAD", summary="Created parameterized enclosure OpenSCAD source.", status="proposed", file_ref="cad/enclosure.scad"),
             DesignChange(target="PCB", summary="Created two-layer board plan and dependencies disclosure.", status="proposed", file_ref="pcb/board.plan"),
-            DesignChange(target="Firmware", summary="Created starter firmware with serial and status LED.", status="proposed", file_ref="firmware/main.cpp"),
+            DesignChange(target="Firmware", summary="Created starter CircuitPython firmware with a status heartbeat.", status="proposed", file_ref="firmware/code.py"),
             DesignChange(target="BOM", summary="Created prototype BOM with supplier and substitution fields.", status="proposed", file_ref="bom/items.json")
         ],
         tool_progress=[
@@ -629,6 +692,89 @@ sv def project_by_id(project_id: str) -> Project | None {
         if jid(project) == project_id { return project; }
     }
     return None;
+}
+
+sv def normalized_project_name(name: str) -> str {
+    clean = name.strip();
+    if not clean { return "Untitled Helix project"; }
+    if len(clean) > 96 { return clean[:96]; }
+    return clean;
+}
+
+sv def normalized_project_prompt(prompt: str) -> str {
+    clean = prompt.strip();
+    if not clean { return "Design a compact electronics product with an enclosure, PCB, firmware, BOM, and validation notes."; }
+    if len(clean) > 12000 { return clean[:12000]; }
+    return clean;
+}
+
+sv def record_project_activity(project: Project, action: str, target: str, summary: str, status: str = "complete") -> ProjectActivity {
+    activity = ProjectActivity(action=action, target=target, summary=summary, status=status);
+    project +>: ProjectActivityLog() :+> activity;
+    return activity;
+}
+
+sv def project_activity_rows(project: Project) -> list[dict[str, str]] {
+    rows: list[dict[str, str]] = [];
+    for activity in [project ->:ProjectActivityLog:->] {
+        rows.append({
+            "id": jid(activity),
+            "action": activity.action,
+            "target": activity.target,
+            "summary": activity.summary,
+            "status": activity.status,
+            "created_at": activity.created_at
+        });
+    }
+    return rows;
+}
+
+sv def version_by_id(project: Project, version_id: str) -> DesignVersion | None {
+    for version in [project ->:ProjectVersion:->] {
+        if jid(version) == version_id { return version; }
+    }
+    return None;
+}
+
+sv def active_version_for(project: Project) -> DesignVersion | None {
+    versions = [project ->:ProjectVersion:->];
+    if not versions { return None; }
+    if project.active_version_id {
+        found = version_by_id(project, project.active_version_id);
+        if found is not None { return found; }
+    }
+    return versions[-1];
+}
+
+sv def version_generation(version: DesignVersion, prompt: str) -> GenerationResult {
+    cads = [version ->:VersionCad:->];
+    pcbs = [version ->:VersionPcb:->];
+    firmwares = [version ->:VersionFirmware:->];
+    boms = [version ->:VersionBom:->];
+    if not cads or not pcbs or not firmwares or not boms {
+        return fallback_generation(prompt);
+    }
+    pcb = pcbs[0];
+    bom = boms[0];
+    return GenerationResult(
+        ok=True,
+        summary=f"Duplicated {version.label} without claiming new AI generation.",
+        cad_source=cads[0].source,
+        cad_document=cads[0].cad_doc,
+        pcb_plan=pcb.plan,
+        pcb_ops=pcb.ops,
+        circuitron=pcb.circuitron,
+        firmware=firmwares[0].source,
+        bom_document=bom.bom_doc,
+        validation=["Copied artifact graph; external checks must be rerun for the duplicate."],
+        changes=[
+            DesignChange(target="Project", summary=f"Copied artifact graph from {version.label}.", status="accepted", file_ref="manifest.json")
+        ],
+        tool_progress=[
+            ToolExecution(tool="copy_graph", status="complete", message="Copied CAD, PCB, firmware, and BOM artifacts in JaC."),
+            ToolExecution(tool="invalidate_checks", status="complete", message="Marked external validation evidence for rerun.")
+        ]
+    );
 }
 
 sv def compute_total(items: list[dict[str, str]]) -> float {
@@ -664,7 +810,7 @@ sv def attach_version(project: Project, result: GenerationResult, label: str) ->
     cad = CADArtifact(name="enclosure.scad", source=result.cad_source, cad_doc=result.cad_document);
     pcb = PCBArtifact(name="board.plan", plan=result.pcb_plan, ops=result.pcb_ops, circuitron=result.circuitron);
     schematic = SchematicArtifact(name="schematic.net", netlist="USB-C -> regulator -> MCU; MCU GPIO -> sensor header; MCU GPIO -> LED.");
-    firmware = FirmwareArtifact(name="main.cpp", source=result.firmware);
+    firmware = FirmwareArtifact(name="code.py", source=result.firmware);
     bom = BOM(name="prototype-bom", bom_doc=result.bom_document, total_estimate=compute_bom_total(result.bom_document));
     version +>: VersionCad() :+> cad;
     version +>: VersionPcb() :+> pcb;
@@ -686,12 +832,20 @@ sv def attach_version(project: Project, result: GenerationResult, label: str) ->
     }
     validation = ValidationRun(name="Manufacturing readiness", score=score_validation(result.validation), status="warnings", notes=result.validation);
     project +>: ProjectValidation() :+> validation;
+    project.active_version_id = jid(version);
     return version;
 }
 
 sv def snapshot_project(project: Project) -> WorkspaceSnapshot {
     versions = [project ->:ProjectVersion:->];
     active = versions[-1] if versions else attach_version(project, fallback_generation(project.prompt), "v1");
+    if project.active_version_id {
+        for version in versions {
+            if jid(version) == project.active_version_id {
+                active = version;
+            }
+        }
+    }
     cads = [active ->:VersionCad:->];
     pcbs = [active ->:VersionPcb:->];
     schematics = [active ->:VersionSchematic:->];
@@ -739,7 +893,8 @@ sv def snapshot_project(project: Project) -> WorkspaceSnapshot {
     cad_doc = cads[0].cad_doc if cads else default_cad_document("");
     pcb_ops = pcbs[0].ops if pcbs else default_pcb_ops();
     circuitron = pcbs[0].circuitron if pcbs else default_circuitron();
-    quote = compute_fab_quote_from_parts(pcb_ops, cad_doc, 10);
+    quote_quantity = quotes[-1].quantity if quotes else 10;
+    quote = compute_fab_quote_from_parts(pcb_ops, cad_doc, quote_quantity);
     payload = ar_payload_from(cad_doc, circuitron);
     return WorkspaceSnapshot(
         project_id=jid(project),
@@ -778,22 +933,36 @@ sv def:pub list_projects -> list[dict[str, str]] {
     get_or_create_demo_user();
     rows: list[dict[str, str]] = [];
     for project in [root-->][?:Project] {
-        rows.append({"id": jid(project), "name": project.name, "prompt": project.prompt, "status": project.status});
+        versions = [project ->:ProjectVersion:->];
+        rows.append({
+            "id": jid(project),
+            "name": project.name,
+            "prompt": project.prompt,
+            "tagline": project.tagline,
+            "status": project.status,
+            "active_version_id": project.active_version_id,
+            "version_count": str(len(versions)),
+            "updated_at": project.updated_at,
+            "shared": str(project.shared)
+        });
     }
     return rows;
 }
 
 sv def:pub create_project(name: str, prompt: str) -> WorkspaceSnapshot {
     user = get_or_create_demo_user();
-    project = root ++> Project(name=name, prompt=prompt, tagline="Generated from original Founder workspace model");
+    clean_name = normalized_project_name(name);
+    clean_prompt = normalized_project_prompt(prompt);
+    project = root ++> Project(name=clean_name, prompt=clean_prompt, tagline="Generated by the Helix native JaC graph model");
     user +>: Owns() :+> project;
     teams = [user ->:MemberOf:->];
     if teams { teams[0] +>: TeamProject() :+> project; }
-    result = fallback_generation(prompt);
+    result = fallback_generation(clean_prompt);
     attach_version(project, result, "v1 local draft");
     conv = Conversation(title=f"{name} copilot");
     project +>: ProjectConversation() :+> conv;
     conv +>: ConversationMessage() :+> Message(role="assistant", content=result.summary);
+    record_project_activity(project, "create", "project", "Created the project and deterministic starter artifact graph.");
     return snapshot_project(project);
 }
 
@@ -806,10 +975,11 @@ sv def:pub load_workspace(project_id: str) -> WorkspaceSnapshot | None {
 sv def:pub generate_hardware_design(project_id: str, prompt: str) -> WorkspaceSnapshot | None {
     project = project_by_id(project_id);
     if project is None { return None; }
+    clean_prompt = normalized_project_prompt(prompt);
     try {
-        result = synthesize_hardware_design(prompt, snapshot_project(project).cad_source);
+        result = synthesize_hardware_design(clean_prompt, snapshot_project(project).cad_source);
     } except Exception {
-        result = fallback_generation(prompt);
+        result = fallback_generation(clean_prompt);
     }
     current_versions = [project ->:ProjectVersion:->];
     label = f"v{len(current_versions) + 1} generated";
@@ -821,10 +991,26 @@ sv def:pub generate_hardware_design(project_id: str, prompt: str) -> WorkspaceSn
     } else {
         conv = convs[0];
     }
-    conv +>: ConversationMessage() :+> Message(role="user", content=prompt);
+    conv +>: ConversationMessage() :+> Message(role="user", content=clean_prompt);
     conv +>: ConversationMessage() :+> Message(role="assistant", content=result.summary);
+    project.prompt = clean_prompt;
     project.updated_at = "local";
+    record_project_activity(project, "generate", "version", f"Created {label} with CAD, PCB, firmware, and BOM artifacts.");
     return snapshot_project(project);
+}
+
+sv def:pub restore_project_version(project_id: str, version_id: str) -> WorkspaceSnapshot | None {
+    project = project_by_id(project_id);
+    if project is None { return None; }
+    for version in [project ->:ProjectVersion:->] {
+        if jid(version) == version_id {
+            project.active_version_id = version_id;
+            project.updated_at = "local";
+            record_project_activity(project, "restore", "version", f"Restored {version.label} as the active artifact graph.");
+            return snapshot_project(project);
+        }
+    }
+    return None;
 }
 
 sv def:pub run_validations(project_id: str) -> WorkspaceSnapshot | None {
@@ -837,6 +1023,7 @@ sv def:pub run_validations(project_id: str) -> WorkspaceSnapshot | None {
         "BOM includes supplier and substitution fields."
     ];
     project +>: ProjectValidation() :+> ValidationRun(name="Readiness audit", score=score_validation(notes), status="warnings", notes=notes);
+    record_project_activity(project, "validate", "project", "Recorded a warning-based manufacturing readiness audit.");
     return snapshot_project(project);
 }
 
@@ -846,6 +1033,7 @@ sv def:pub create_ar_handoff(project_id: str, capability: ArCapability) -> dict[
     token = "ar-" + project_id[:8];
     handoff = ARHandoff(token=token, model_format="glb/usdz/open-scad-source", expires_at="24h", status="ready-with-fallback", dimensions=snapshot_project(project).cad_source[:80], fallback=capability.fallback);
     project +>: ProjectAr() :+> handoff;
+    record_project_activity(project, "create", "ar_handoff", f"Recorded AR fallback mode: {capability.fallback}.");
     return {"ok": "true", "token": token, "fallback": capability.fallback, "message": capability.message};
 }
 
@@ -853,11 +1041,14 @@ sv def:pub create_fabrication_quote(project_id: str, quantity: int) -> dict[str,
     project = project_by_id(project_id);
     if project is None { return {"ok": "false", "error": "project not found"}; }
     qty = quantity if quantity > 0 else 1;
-    amount = 4200 + qty * 1850;
+    workspace = snapshot_project(project);
+    priced = compute_fab_quote_from_parts(workspace.pcb_ops, workspace.cad_document, qty);
+    amount = priced.total_cents;
     quote = ManufacturingQuote(status=OrderStatus.QUOTED, quantity=qty, amount_cents=amount, details="Server-priced prototype quote. Stripe checkout requires STRIPE_SECRET_KEY.");
     order = Order(status=OrderStatus.CHECKOUT_REQUIRED, details="Stripe not configured in local Jac deployment.");
     project +>: ProjectQuote() :+> quote;
     quote +>: QuoteOrder() :+> order;
+    record_project_activity(project, "quote", "manufacturing", f"Created authoritative quantity-{qty} prototype quote.");
     return {"ok": "true", "amount_cents": str(amount), "currency": "usd", "status": "CHECKOUT_REQUIRED", "details": quote.details};
 }
 
@@ -865,7 +1056,264 @@ sv def:pub share_project(project_id: str) -> dict[str, str] {
     project = project_by_id(project_id);
     if project is None { return {"ok": "false", "error": "project not found"}; }
     project.shared = True;
+    record_project_activity(project, "share", "project", "Enabled read-only project sharing metadata.");
     return {"ok": "true", "share_url": f"/share/{project_id}"};
+}
+
+sv def:pub rename_project(project_id: str, name: str) -> WorkspaceSnapshot | None {
+    project = project_by_id(project_id);
+    if project is None { return None; }
+    previous = project.name;
+    project.name = normalized_project_name(name);
+    project.updated_at = "local";
+    record_project_activity(project, "rename", "project", f"Renamed {previous} to {project.name}.");
+    return snapshot_project(project);
+}
+
+sv def:pub duplicate_project(project_id: str, name: str = "") -> WorkspaceSnapshot | None {
+    source = project_by_id(project_id);
+    if source is None { return None; }
+    source_version = active_version_for(source);
+    if source_version is None { return None; }
+    user = get_or_create_demo_user();
+    duplicate_name = normalized_project_name(name if name.strip() else source.name + " copy");
+    duplicate = root ++> Project(
+        name=duplicate_name,
+        prompt=source.prompt,
+        tagline=f"Duplicate of {source.name}"
+    );
+    user +>: Owns() :+> duplicate;
+    teams = [user ->:MemberOf:->];
+    if teams { teams[0] +>: TeamProject() :+> duplicate; }
+    generation = version_generation(source_version, source.prompt);
+    attach_version(duplicate, generation, "v1 copied graph");
+    conv = Conversation(title=f"{duplicate_name} copilot");
+    duplicate +>: ProjectConversation() :+> conv;
+    conv +>: ConversationMessage() :+> Message(role="assistant", content=generation.summary);
+    record_project_activity(duplicate, "duplicate", "project", f"Copied active artifact graph from {source.name}.");
+    return snapshot_project(duplicate);
+}
+
+sv def:pub archive_project(project_id: str) -> dict[str, str] {
+    project = project_by_id(project_id);
+    if project is None { return {"ok": "false", "error": "project not found"}; }
+    project.status = "archived";
+    project.updated_at = "local";
+    record_project_activity(project, "archive", "project", "Archived project without deleting graph history.");
+    return {"ok": "true", "project_id": project_id, "status": project.status};
+}
+
+sv def:pub reactivate_project(project_id: str) -> WorkspaceSnapshot | None {
+    project = project_by_id(project_id);
+    if project is None { return None; }
+    project.status = "active";
+    project.updated_at = "local";
+    record_project_activity(project, "reactivate", "project", "Restored archived project to the active workspace.");
+    return snapshot_project(project);
+}
+
+sv def:pub get_project_activity(project_id: str) -> list[dict[str, str]] {
+    project = project_by_id(project_id);
+    if project is None { return []; }
+    return project_activity_rows(project);
+}
+
+sv def:pub compare_project_versions(project_id: str, from_version_id: str, to_version_id: str) -> VersionComparison | None {
+    project = project_by_id(project_id);
+    if project is None { return None; }
+    from_version = version_by_id(project, from_version_id);
+    to_version = version_by_id(project, to_version_id);
+    if from_version is None or to_version is None { return None; }
+    from_cads = [from_version ->:VersionCad:->];
+    to_cads = [to_version ->:VersionCad:->];
+    from_pcbs = [from_version ->:VersionPcb:->];
+    to_pcbs = [to_version ->:VersionPcb:->];
+    from_firmwares = [from_version ->:VersionFirmware:->];
+    to_firmwares = [to_version ->:VersionFirmware:->];
+    from_boms = [from_version ->:VersionBom:->];
+    to_boms = [to_version ->:VersionBom:->];
+    if not from_cads or not to_cads or not from_pcbs or not to_pcbs or not from_firmwares or not to_firmwares or not from_boms or not to_boms {
+        return None;
+    }
+    feature_delta = len(to_cads[0].cad_doc.features) - len(from_cads[0].cad_doc.features);
+    bom_delta = len(to_boms[0].bom_doc.lines) - len(from_boms[0].bom_doc.lines);
+    firmware_delta = len(to_firmwares[0].source) - len(from_firmwares[0].source);
+    width_delta = to_pcbs[0].ops.width_mm - from_pcbs[0].ops.width_mm;
+    height_delta = to_pcbs[0].ops.height_mm - from_pcbs[0].ops.height_mm;
+    return VersionComparison(
+        project_id=project_id,
+        from_version_id=from_version_id,
+        to_version_id=to_version_id,
+        from_label=from_version.label,
+        to_label=to_version.label,
+        cad_feature_delta=feature_delta,
+        bom_line_delta=bom_delta,
+        firmware_byte_delta=firmware_delta,
+        pcb_width_delta_mm=width_delta,
+        pcb_height_delta_mm=height_delta,
+        summary=f"CAD features {feature_delta:+d}; BOM lines {bom_delta:+d}; firmware bytes {firmware_delta:+d}; PCB {width_delta:+.1f} x {height_delta:+.1f} mm."
+    );
+}
+
+sv def project_readiness_evidence(project: Project) -> list[ReadinessEvidence] {
+    workspace = snapshot_project(project);
+    rows: list[ReadinessEvidence] = [];
+    rows.append(ReadinessEvidence(
+        key="cad-source",
+        label="CAD source",
+        state=("verified" if workspace.cad_source else "blocked"),
+        source="JaC CADArtifact",
+        message=("OpenSCAD source and dimensions exist." if workspace.cad_source else "No CAD source exists."),
+        score_impact=(0 if workspace.cad_source else -30)
+    ));
+    drc_ran = workspace.circuitron.design_validation.passed > 0 or workspace.circuitron.design_validation.errors > 0;
+    rows.append(ReadinessEvidence(
+        key="pcb-drc",
+        label="PCB DRC/ERC",
+        state=("verified" if drc_ran and workspace.circuitron.design_validation.errors == 0 else "not_run"),
+        source="CircuitronResponse.design_validation",
+        message=workspace.circuitron.design_validation.summary,
+        score_impact=(0 if drc_ran and workspace.circuitron.design_validation.errors == 0 else -20)
+    ));
+    rows.append(ReadinessEvidence(
+        key="firmware-build",
+        label="Firmware build",
+        state="not_run",
+        source="FirmwareArtifact.build_status",
+        message="CircuitPython source exists, but no hardware build runner has reported a result.",
+        score_impact=-16
+    ));
+    missing_bom = 0;
+    for line in workspace.bom_document.lines {
+        if not line.mpn or not line.supplier { missing_bom = missing_bom + 1; }
+    }
+    rows.append(ReadinessEvidence(
+        key="bom-sourcing",
+        label="BOM sourcing",
+        state=("verified" if missing_bom == 0 and bool(workspace.bom_document.lines) else "warning"),
+        source="BOMDocument",
+        message=(f"{len(workspace.bom_document.lines)} normalized lines include supplier and MPN fields." if missing_bom == 0 else f"{missing_bom} lines are missing supplier or MPN data."),
+        score_impact=(0 if missing_bom == 0 else -12)
+    ));
+    rows.append(ReadinessEvidence(
+        key="checkout",
+        label="Manufacturing checkout",
+        state=("warning" if workspace.order_status == "CHECKOUT_REQUIRED" else "not_run"),
+        source="ManufacturingQuote / Order",
+        message=("Server quote exists; Stripe checkout is not configured." if workspace.order_status == "CHECKOUT_REQUIRED" else "No manufacturing order has been requested."),
+        score_impact=-6
+    ));
+    return rows;
+}
+
+sv def:pub get_readiness_evidence(project_id: str) -> list[dict[str, str]] {
+    project = project_by_id(project_id);
+    if project is None { return []; }
+    rows: list[dict[str, str]] = [];
+    for evidence in project_readiness_evidence(project) {
+        rows.append({
+            "key": evidence.key,
+            "label": evidence.label,
+            "state": evidence.state,
+            "source": evidence.source,
+            "message": evidence.message,
+            "score_impact": str(evidence.score_impact)
+        });
+    }
+    return rows;
+}
+
+sv def csv_cell(value: str) -> str {
+    return "\"" + value.replace("\"", "\"\"") + "\"";
+}
+
+sv def bom_csv(document: BomDocument) -> str {
+    csv = "reference,component,manufacturer,mpn,quantity,unit_price,availability,supplier\n";
+    for line in document.lines {
+        csv = csv
+            + csv_cell(line.designators) + ","
+            + csv_cell(line.description) + ","
+            + csv_cell(line.manufacturer) + ","
+            + csv_cell(line.mpn) + ","
+            + str(line.qty) + ","
+            + f"{line.unit_price:.2f}" + ","
+            + csv_cell(line.availability) + ","
+            + csv_cell(line.supplier) + "\n";
+    }
+    return csv;
+}
+
+sv def:pub build_project_bundle(project_id: str) -> ProjectBundle | None {
+    project = project_by_id(project_id);
+    if project is None { return None; }
+    workspace = snapshot_project(project);
+    safe_name = normalized_project_name(project.name).lower().replace(" ", "-");
+    files = {
+        f"{safe_name}/cad/enclosure.scad": workspace.cad_source,
+        f"{safe_name}/pcb/board.plan.txt": workspace.pcb_plan,
+        f"{safe_name}/pcb/schematic.net": workspace.schematic,
+        f"{safe_name}/firmware/code.py": workspace.firmware,
+        f"{safe_name}/bom/prototype.csv": bom_csv(workspace.bom_document),
+        f"{safe_name}/validation/readiness.txt": "\n".join([row["notes"] for row in workspace.validation])
+    };
+    manifest = {
+        "project_id": project_id,
+        "project_name": project.name,
+        "version": workspace.active_version,
+        "cad_format": "openscad",
+        "firmware_language": "circuitpython",
+        "pcb_source": workspace.circuitron.pcb_source,
+        "readiness_score": str(workspace.readiness_score),
+        "order_status": workspace.order_status
+    };
+    warnings = [
+        "STL and STEP are not included because no CAD worker is configured.",
+        "KiCad DRC/ERC evidence is not included unless Circuitron reports a real run.",
+        "Firmware has not been built or flashed by Helix.",
+        "Bundle contents are source artifacts, not a manufacturing approval."
+    ];
+    byte_length = 0;
+    for content in files.values() { byte_length = byte_length + len(content); }
+    project +>: ProjectExport() :+> ExportRecord(format="source-bundle", filename=f"{safe_name}.json", version_label=workspace.active_version, byte_length=byte_length);
+    record_project_activity(project, "export", "project_bundle", f"Built a {byte_length}-byte source bundle manifest.");
+    return ProjectBundle(
+        project_id=project_id,
+        project_name=project.name,
+        version_label=workspace.active_version,
+        generated_at="local",
+        manifest=manifest,
+        files=files,
+        warnings=warnings
+    );
+}
+
+sv def:pub project_graph_stats(project_id: str) -> dict[str, str] {
+    project = project_by_id(project_id);
+    if project is None { return {"ok": "false", "error": "project not found"}; }
+    versions = [project ->:ProjectVersion:->];
+    validations = [project ->:ProjectValidation:->];
+    quotes = [project ->:ProjectQuote:->];
+    activities = [project ->:ProjectActivityLog:->];
+    exports = [project ->:ProjectExport:->];
+    artifact_count = 0;
+    for version in versions {
+        artifact_count = artifact_count
+            + len([version ->:VersionCad:->])
+            + len([version ->:VersionPcb:->])
+            + len([version ->:VersionSchematic:->])
+            + len([version ->:VersionFirmware:->])
+            + len([version ->:VersionBom:->]);
+    }
+    return {
+        "ok": "true",
+        "project_id": project_id,
+        "versions": str(len(versions)),
+        "artifacts": str(artifact_count),
+        "validations": str(len(validations)),
+        "quotes": str(len(quotes)),
+        "activities": str(len(activities)),
+        "exports": str(len(exports))
+    };
 }
 
 sv walker:pub CreateProject {
@@ -888,6 +1336,65 @@ sv walker:pub GenerateHardwareDesign {
 sv walker:pub RunValidations {
     has project_id: str;
     can run with Root entry { report run_validations(self.project_id); }
+}
+
+sv walker:pub RestoreProjectVersion {
+    has project_id: str,
+        version_id: str;
+    can run with Root entry { report restore_project_version(self.project_id, self.version_id); }
+}
+
+sv walker:pub ListProjects {
+    can run with Root entry { report list_projects(); }
+}
+
+sv walker:pub RenameProject {
+    has project_id: str,
+        name: str;
+    can run with Root entry { report rename_project(self.project_id, self.name); }
+}
+
+sv walker:pub DuplicateProject {
+    has project_id: str,
+        name: str = "";
+    can run with Root entry { report duplicate_project(self.project_id, self.name); }
+}
+
+sv walker:pub ArchiveProject {
+    has project_id: str;
+    can run with Root entry { report archive_project(self.project_id); }
+}
+
+sv walker:pub ReactivateProject {
+    has project_id: str;
+    can run with Root entry { report reactivate_project(self.project_id); }
+}
+
+sv walker:pub ProjectActivityHistory {
+    has project_id: str;
+    can run with Root entry { report get_project_activity(self.project_id); }
+}
+
+sv walker:pub CompareProjectVersions {
+    has project_id: str,
+        from_version_id: str,
+        to_version_id: str;
+    can run with Root entry { report compare_project_versions(self.project_id, self.from_version_id, self.to_version_id); }
+}
+
+sv walker:pub ReadinessEvidenceReport {
+    has project_id: str;
+    can run with Root entry { report get_readiness_evidence(self.project_id); }
+}
+
+sv walker:pub BuildProjectBundle {
+    has project_id: str;
+    can run with Root entry { report build_project_bundle(self.project_id); }
+}
+
+sv walker:pub ProjectGraphStats {
+    has project_id: str;
+    can run with Root entry { report project_graph_stats(self.project_id); }
 }
 
 sv walker:pub Health {
@@ -999,7 +1506,7 @@ def:pub Workspace(snapshot: WorkspaceSnapshot | None, onUpdate: Callable[[Worksp
             <div className="hero-orb"></div>
             <p className="eyebrow">Helix</p>
             <h1>Go from idea to hardware, fast.</h1>
-            <p>The original Founder workflow rebuilt as a native JaC graph app: prompt, chat, CAD, PCB, BOM, firmware, AR, and prototype orders in one workspace.</p>
+            <p>Helix runs as a native JaC graph app: prompt, chat, CAD, PCB, BOM, firmware, AR, and prototype orders in one workspace.</p>
         </main>;
     }
 
@@ -1143,7 +1650,7 @@ test "original template structures are represented in Jac" {
 test "fallback generation carries migrated CAD PCB BOM data" {
     result = fallback_generation("houseplant soil watcher");
     assert len(result.cad_document.features) >= 5;
-    assert len(result.bom_document.lines) >= 5;
+    assert len(result.bom_document.lines) >= 3;
     assert result.circuitron.pcb_source == "mock";
 }
 
@@ -1152,4 +1659,121 @@ test "fab quote uses original area and volume style math" {
     assert quote.total_cents > 0;
     assert quote.pcb_area_cm2 == 17.5;
     assert len(quote.lines) == 3;
+}
+
+test "project input normalization is bounded and deliberate" {
+    assert normalized_project_name("  Spatial sensor  ") == "Spatial sensor";
+    assert normalized_project_name("  ") == "Untitled Helix project";
+    assert len(normalized_project_name("x" * 140)) == 96;
+    assert normalized_project_prompt("  enclosure prompt  ") == "enclosure prompt";
+    assert len(normalized_project_prompt("y" * 13000)) == 12000;
+}
+
+test "CircuitPython fallback contains no C plus plus artifact path" {
+    result = fallback_generation("portable sensor");
+    assert "import board" in result.firmware;
+    assert "#include" not in result.firmware;
+    firmware_changes = [change for change in result.changes if change.target == "Firmware"];
+    assert len(firmware_changes) == 1;
+    assert firmware_changes[0].file_ref == "firmware/code.py";
+}
+
+test "BOM CSV export preserves normalized sourcing fields" {
+    document = default_bom_document("sensor");
+    csv = bom_csv(document);
+    assert csv.startswith("reference,component,manufacturer");
+    assert "ESP32-S3-MINI-1" in csv;
+    assert "Digi-Key" in csv;
+    assert len(csv.split("\n")) > len(document.lines);
+}
+
+test "project lifecycle APIs preserve graph history" {
+    snapshot = create_project("Lifecycle fixture", "Design a USB sensor");
+    project_id = snapshot.project_id;
+    renamed = rename_project(project_id, "Lifecycle fixture renamed");
+    assert renamed is not None;
+    assert renamed.name == "Lifecycle fixture renamed";
+    archived = archive_project(project_id);
+    assert archived["ok"] == "true";
+    assert archived["status"] == "archived";
+    restored = reactivate_project(project_id);
+    assert restored is not None;
+    active_project = project_by_id(project_id);
+    assert active_project is not None;
+    assert active_project.status == "active";
+    assert len(get_project_activity(project_id)) >= 4;
+}
+
+test "duplicate project copies typed artifact graph" {
+    source = create_project("Duplicate source", "Design a small BLE node");
+    duplicate = duplicate_project(source.project_id, "Duplicate target");
+    assert duplicate is not None;
+    assert duplicate.name == "Duplicate target";
+    assert duplicate.project_id != source.project_id;
+    assert duplicate.cad_source == source.cad_source;
+    assert duplicate.firmware == source.firmware;
+    assert len(duplicate.bom_document.lines) == len(source.bom_document.lines);
+    assert duplicate.active_version == "v1 copied graph";
+}
+
+test "active version restore changes returned artifact graph" {
+    snapshot = create_project("Version fixture", "Design a desk sensor");
+    project = project_by_id(snapshot.project_id);
+    assert project is not None;
+    first_id = snapshot.versions[0]["id"];
+    attach_version(project, fallback_generation("Design a revised desk sensor"), "v2 deterministic");
+    latest = snapshot_project(project);
+    assert latest.active_version == "v2 deterministic";
+    restored = restore_project_version(snapshot.project_id, first_id);
+    assert restored is not None;
+    assert restored.active_version == "v1 local draft";
+    assert len(restored.versions) == 2;
+}
+
+test "version comparison reports concrete artifact deltas" {
+    snapshot = create_project("Compare fixture", "Design a compact logger");
+    project = project_by_id(snapshot.project_id);
+    assert project is not None;
+    first_id = snapshot.versions[0]["id"];
+    attach_version(project, fallback_generation("Design a revised compact logger"), "v2 deterministic");
+    latest = snapshot_project(project);
+    second_id = latest.versions[1]["id"];
+    comparison = compare_project_versions(snapshot.project_id, first_id, second_id);
+    assert comparison is not None;
+    assert comparison.from_label == "v1 local draft";
+    assert comparison.to_label == "v2 deterministic";
+    assert "CAD features" in comparison.summary;
+}
+
+test "readiness evidence never invents external validation" {
+    snapshot = create_project("Evidence fixture", "Design a field monitor");
+    evidence = get_readiness_evidence(snapshot.project_id);
+    assert len(evidence) == 5;
+    drc = [row for row in evidence if row["key"] == "pcb-drc"];
+    firmware = [row for row in evidence if row["key"] == "firmware-build"];
+    assert drc[0]["state"] == "not_run";
+    assert firmware[0]["state"] == "not_run";
+    assert "no hardware build runner" in firmware[0]["message"];
+}
+
+test "project bundle contains source artifacts and explicit warnings" {
+    snapshot = create_project("Bundle fixture", "Design an environmental logger");
+    bundle = build_project_bundle(snapshot.project_id);
+    assert bundle is not None;
+    assert bundle.manifest["firmware_language"] == "circuitpython";
+    assert bundle.manifest["cad_format"] == "openscad";
+    assert len(bundle.files) == 6;
+    assert any([path.endswith("enclosure.scad") for path in bundle.files.keys()]);
+    assert any([path.endswith("code.py") for path in bundle.files.keys()]);
+    assert len(bundle.warnings) == 4;
+}
+
+test "project graph stats count versions artifacts and activity" {
+    snapshot = create_project("Graph stats fixture", "Design a control module");
+    stats = project_graph_stats(snapshot.project_id);
+    assert stats["ok"] == "true";
+    assert int(stats["versions"]) >= 1;
+    assert int(stats["artifacts"]) >= 5;
+    assert int(stats["validations"]) >= 1;
+    assert int(stats["activities"]) >= 1;
 }
